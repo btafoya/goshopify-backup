@@ -47,6 +47,25 @@ go install github.com/btafoya/goshopify-backup@v1.0.0
 export PATH=$PATH:$(go env GOPATH)/bin
 ```
 
+#### Download Pre-built Binaries
+
+Download the appropriate binary for your platform from the [releases page](https://github.com/btafoya/goshopify-backup/releases):
+
+| Platform | Binary |
+|----------|--------|
+| Linux x86_64 | [goshopify-backup-linux-amd64.tar.gz](https://github.com/btafoya/goshopify-backup/releases/latest/download/goshopify-backup-linux-amd64.tar.gz) |
+| Linux ARM64 | [goshopify-backup-linux-arm64.tar.gz](https://github.com/btafoya/goshopify-backup/releases/latest/download/goshopify-backup-linux-arm64.tar.gz) |
+| macOS x86_64 (Intel) | [goshopify-backup-darwin-amd64.tar.gz](https://github.com/btafoya/goshopify-backup/releases/latest/download/goshopify-backup-darwin-amd64.tar.gz) |
+| macOS ARM64 (Apple Silicon) | [goshopify-backup-darwin-arm64.tar.gz](https://github.com/btafoya/goshopify-backup/releases/latest/download/goshopify-backup-darwin-arm64.tar.gz) |
+
+```bash
+# Download and extract
+curl -LO https://github.com/btafoya/goshopify-backup/releases/latest/download/goshopify-backup-linux-amd64.tar.gz
+tar -xzf goshopify-backup-linux-amd64.tar.gz
+chmod +x goshopify-backup-linux-amd64
+sudo mv goshopify-backup-linux-amd64 /usr/local/bin/goshopify-backup
+```
+
 #### Building from Source
 
 ```bash
