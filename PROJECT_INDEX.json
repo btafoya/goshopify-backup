@@ -1,0 +1,167 @@
+{
+  "project": "goshopify-backup",
+  "generated": "2026-04-03",
+  "description": "Pure Go CLI tool that dumps Shopify store data nightly to a directory as flat JSON files",
+  "language": "go",
+  "go_version": "1.25.0",
+  "entry_point": "main.go",
+  "structure": {
+    "root_files": [
+      "main.go",
+      "config.go",
+      "constants.go",
+      "types.go",
+      "cleanup.go",
+      "go.mod",
+      "Makefile",
+      "Dockerfile",
+      "README.md",
+      "LICENSE"
+    ],
+    "directories": {
+      "backup": {
+        "files": ["backup.go", "content.go", "metaobjects.go", "redirects.go", "util.go"],
+        "purpose": "Backup modules for each data type"
+      },
+      "shopify": {
+        "files": ["client.go", "graphql.go", "rest.go", "types.go", "shopify_test.go"],
+        "purpose": "Shopify API clients (GraphQL and REST) with rate limiting"
+      },
+      "jsonl": {
+        "files": ["parser.go", "parser_test.go", "reconstruct.go", "reconstruct_test.go"],
+        "purpose": "JSONL parsing and reconstruction for bulk operation results"
+      },
+      "logger": {
+        "files": ["logger.go"],
+        "purpose": "Structured JSON logging"
+      },
+      "lock": {
+        "files": ["lock.go", "lock_test.go"],
+        "purpose": "Concurrent execution prevention via lock files"
+      },
+      "recovery": {
+        "files": ["recovery.go"],
+        "purpose": "Partial backup recovery and resume"
+      },
+      "status": {
+        "files": ["writer.go", "types.go", "status_test.go"],
+        "purpose": "Status file writing and tracking"
+      },
+      "docker": {
+        "files": ["Dockerfile"],
+        "purpose": "Containerization"
+      }
+    }
+  },
+  "modules": {
+    "shopify/client": {
+      "exports": ["RateLimiter", "Config", "NewRateLimiter"],
+      "purpose": "Leaky bucket rate limiter (40 req/sec), shared client config"
+    },
+    "shopify/graphql": {
+      "exports": ["GraphQLClient", "NewGraphQLClient", "SubmitBulkOperation", "PollBulkOperation", "DownloadJSONL"],
+      "purpose": "GraphQL bulk operations with 10-min timeout, 1s polling"
+    },
+    "shopify/rest": {
+      "exports": ["RESTClient", "NewRESTClient", "Paginate", "Get"],
+      "purpose": "REST API with cursor pagination and retry logic"
+    },
+    "backup": {
+      "exports": [
+        "ProductsModule", "NewProductsModule",
+        "CustomersModule", "NewCustomersModule",
+        "OrdersModule", "NewOrdersModule",
+        "CollectionsModule", "NewCollectionsModule",
+        "ContentModule", "NewContentModule",
+        "MetaobjectsModule", "NewMetaobjectsModule",
+        "RedirectsModule", "NewRedirectsModule"
+      ],
+      "purpose": "Per-entity backup orchestration with bulk/REST fallback"
+    },
+    "jsonl": {
+      "exports": ["Parser", "NewParser", "ReconstructBulkData", "NormalizeJSONL"],
+      "purpose": "Streaming JSONL parsing and nested structure reconstruction"
+    },
+    "lock": {
+      "exports": ["Manager", "NewManager", "Acquire", "Release"],
+      "purpose": "Date-specific lock files, stale lock cleanup (24h)"
+    },
+    "recovery": {
+      "exports": ["Manager", "NewManager", "ShouldResume", "GetModulesToRun"],
+      "purpose": "Resume incomplete backups from status.json"
+    },
+    "status": {
+      "exports": ["Writer", "NewWriter", "Update", "LoadStatus"],
+      "purpose": "Real-time status tracking with 5s buffered flush"
+    },
+    "logger": {
+      "exports": ["Logger", "NewLogger"],
+      "purpose": "Structured JSON logging"
+    }
+  },
+  "environment_variables": {
+    "SHOPIFY_STORE": {"required": true, "default": null, "validation": "HTTPS URL (https://*.myshopify.com)"},
+    "SHOPIFY_ACCESS_TOKEN": {"required": true, "default": null, "validation": "Non-empty string"},
+    "SHOPIFY_API_VERSION": {"required": false, "default": "2025-01", "validation": "YYYY-MM format"},
+    "BACKUP_DIR": {"required": false, "default": "/backups/shopify", "validation": "Writable directory"},
+    "RETENTION_DAYS": {"required": false, "default": "30", "validation": "1-3650 range"}
+  },
+  "backup_modules": [
+    {"name": "products", "method": "GraphQL bulk", "fallback": "REST", "output": "products.json"},
+    {"name": "customers", "method": "GraphQL bulk", "fallback": "REST", "output": "customers.json"},
+    {"name": "orders", "method": "GraphQL bulk", "fallback": "REST", "output": "orders.json"},
+    {"name": "collections", "method": "GraphQL bulk", "fallback": "REST", "output": "collections.json"},
+    {"name": "content", "method": "REST", "fallback": null, "output": "pages.json, blogs.json, metafields.json"},
+    {"name": "metaobjects", "method": "GraphQL pagination", "fallback": null, "output": "metaobjects/*.json"},
+    {"name": "redirects", "method": "GraphQL bulk", "fallback": "REST", "output": "url-redirects.json"}
+  ],
+  "constants": {
+    "API_VERSION": "2025-01",
+    "MIN_REQUEST_INTERVAL_MS": 25,
+    "DEFAULT_POLL_TIMEOUT_MS": 600000,
+    "IMAGE_CONCURRENCY_LIMIT": 10,
+    "STATUS_FLUSH_INTERVAL_S": 5,
+    "STALE_LOCK_DURATION_HOURS": 24,
+    "MaxRetentionDays": 3650,
+    "RequestsPerSecond": 40
+  },
+  "exit_codes": {
+    "0": "Success",
+    "1": "Backup failed",
+    "2": "Configuration error",
+    "3": "Concurrent execution"
+  },
+  "dependencies": [
+    {"name": "github.com/go-resty/resty/v2", "version": "v2.17.2", "purpose": "REST client"},
+    {"name": "github.com/sirupsen/logrus", "version": "v1.9.3", "purpose": "Structured logging"},
+    {"name": "github.com/joho/godotenv", "version": "v1.5.1", "purpose": ".env loading"},
+    {"name": "golang.org/x/sync", "version": "v0.20.0", "purpose": "Semaphore for concurrency"},
+    {"name": "golang.org/x/net", "version": "v0.43.0", "purpose": "Indirect"},
+    {"name": "golang.org/x/sys", "version": "v0.35.0", "purpose": "Indirect"}
+  ],
+  "test_files": [
+    "config_test.go",
+    "jsonl/parser_test.go",
+    "jsonl/reconstruct_test.go",
+    "backup/metaobjects_test.go",
+    "backup/redirects_test.go",
+    "lock/lock_test.go",
+    "shopify/shopify_test.go",
+    "status/status_test.go"
+  ],
+  "commands": {
+    "install": "go install github.com/btafoya/goshopify-backup@latest",
+    "run": "./goshopify-backup",
+    "force": "./goshopify-backup --force",
+    "health_check": "./goshopify-backup --health-check",
+    "test": "make test"
+  },
+  "documentation": [
+    "README.md",
+    "CLAUDE.md",
+    "prd/go-port-spec.md",
+    "prd/go-port-design.md",
+    "prd/metaobjects-redirects-design.md",
+    "deploy/metrics.md"
+  ]
+}
