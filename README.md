@@ -1,23 +1,32 @@
 # Shopify Backup Tool
 
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://go.dev/dl/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Report Card](https://goreportcard.com/badge/github.com/btafoya/goshopify-backup)](https://goreportcard.com/report/github.com/btafoya/goshopify-backup)
+[![Release](https://img.shields.io/github/v/release/btafoya/goshopify-backup)](https://github.com/btafoya/goshopify-backup/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/btafoya/goshopify-backup)](https://hub.docker.com/r/btafoya/goshopify-backup)
+[![GitHub Downloads](https://img.shields.io/github/downloads/btafoya/goshopify-backup/total)](https://github.com/btafoya/goshopify-backup/releases)
+
 A Go CLI tool that dumps Shopify store data nightly to a directory as flat JSON files.
 
 ## Features
 
 - **Bulk API Operations**: Uses Shopify GraphQL bulk operations for efficient data export
 - **REST Fallback**: Automatically falls back to REST API if bulk operations are denied
-- **Multiple Data Types**: Backs up products, customers, orders, collections, pages, blogs, metafields, metaobjects, and URL redirects
+- **Multiple Data Types**: Backs up products, customers, orders, collections, pages, blogs, shop metafields, metaobjects, and URL redirects
 - **Concurrent Protection**: Lock file prevents multiple backups from running simultaneously
 - **Partial Recovery**: Resumes from incomplete backups after interruption
 - **Retention Policy**: Automatically cleans up old backups
 - **Structured Logging**: JSON-formatted logs for easy parsing
 - **Status Tracking**: Real-time status updates with `status.json`
+- **Image Download**: Optional product image downloads
+- **Systemd Integration**: Scheduled backups via systemd timer
 
 ## Quick Start
 
 ### Prerequisites
 
-- Go 1.23+
+- Go 1.25+
 - Shopify store with Admin API access
 - Valid Shopify access token
 
@@ -43,7 +52,7 @@ Create a `.env` file:
 SHOPIFY_STORE=https://your-store.myshopify.com
 SHOPIFY_ACCESS_TOKEN=shpat_xxxxxxxx
 SHOPIFY_API_VERSION=2025-01
-BACKUP_DIR=/path/to/backups
+BACKUP_DIR=/backups/shopify
 RETENTION_DAYS=30
 ```
 
@@ -51,49 +60,82 @@ RETENTION_DAYS=30
 
 ```bash
 # Run backup
-./goshopify-backup
+./bin/goshopify-backup
 
 # Force re-run (override completed modules)
-./goshopify-backup --force
+./bin/goshopify-backup --force
 
 # Check health
-./goshopify-backup --health-check
+./bin/goshopify-backup --health-check
+
+# Run via Make
+make run
+make run-force
 ```
 
 ## Output Structure
 
 ```
 {BACKUP_DIR}/YYYY-MM-DD/
-├── status.json          # Backup status and metadata
-├── products.json        # Products with variants and images
-├── customers.json        # Customers with addresses
-├── orders.json          # Orders with line items and transactions
-├── collections.json     # Collections with products
-├── pages.json           # Store pages
-├── blogs.json           # Blogs and articles
-├── metafields.json      # Shop-level metafields
-├── url-redirects.json   # URL redirects
-├── metaobjects/         # Metaobject definitions and entries
+├── status.json               # Backup status and metadata
+├── products.json             # Products with variants, images, and metafields
+├── customers.json            # Customers with addresses and metafields
+├── orders.json               # Orders with line items, fulfillments, refunds, and metafields
+├── collections.json          # Collections with products, rules, and metafields
+├── pages.json                # Store pages
+├── blogs.json                # Blogs and articles
+├── metafields.json           # Shop-level metafields
+├── url-redirects.json        # URL redirects
+├── metaobjects/              # Metaobject definitions and entries
 │   ├── metaobject-definitions.json
-│   ├── {type}.json      # Per metaobject type (e.g., size_chart.json)
+│   ├── {type}.json           # Per metaobject type (e.g., size_chart.json)
 │   └── ...
-└── images/               # Product images
+└── images/                   # Product images
     └── {product_id}/
         ├── 0.jpg
         └── ...
 ```
 
+## Backup Modules
+
+The tool runs backup modules in the following order:
+
+| Module | Method | Output Files |
+|--------|--------|--------------|
+| `products` | GraphQL bulk (REST fallback) | `products.json`, `images/` |
+| `customers` | GraphQL bulk (REST fallback) | `customers.json` |
+| `orders` | GraphQL bulk (REST fallback) | `orders.json` |
+| `collections` | GraphQL bulk (REST fallback) | `collections.json` |
+| `content` | REST API | `pages.json`, `blogs.json`, `metafields.json` |
+| `metaobjects` | GraphQL pagination | `metaobjects/*.json` |
+| `redirects` | GraphQL bulk (REST fallback) | `url-redirects.json` |
+
 ## Make Commands
 
 ```bash
 make build              # Build the binary
-make test               # Run tests
-make clean              # Clean build artifacts
+make run                # Run the application locally
+make run-force          # Run with force flag
+make test               # Run tests with coverage
+make test-coverage      # Run tests with coverage report
 make fmt                # Format code
+make lint               # Run linter (golangci-lint)
 make vet                # Run go vet
-make lint               # Run linter
+make deps               # Install dependencies
+make clean              # Clean build artifacts
+make clean-backups      # Clean backups directory
 make docker-build       # Build Docker image
 make docker-run         # Run Docker container
+make docker-daemon      # Run Docker container in detached mode
+make docker-stop        # Stop Docker container
+make docker-logs        # View Docker logs
+make dc-up              # Start services with docker-compose
+make dc-down            # Stop services with docker-compose
+make dc-logs            # View docker-compose logs
+make install            # Install to /usr/local/bin
+make install-go         # Install to GOPATH/bin
+make check              # Run all checks (fmt, vet, lint, test)
+make build-all          # Build for multiple platforms
 make release            # Create release tarballs
 make help               # Show all commands
 ```
@@ -113,17 +155,27 @@ docker run --rm \
   goshopify-backup
 
 # Or use docker-compose
-docker-compose -f docker/docker-compose.yml up -d
+make dc-up
 ```
 
-### Production Deployment
+### Docker Image Details
+
+- Multi-stage build with `golang:1.25-alpine` for building
+- Runtime based on `alpine:latest`
+- Non-root user (65534:65534)
+- Resource limits: CPU 1 core, Memory 512Mi
+- Health check enabled
+
+## Production Deployment
+
+### Systemd Installation
 
 ```bash
 # Install as a service
 sudo bash deploy/install.sh
 
 # Check service status
-systemctl status goshopify-backup
+systemctl status goshopify-backup.service
 
 # View logs
 journalctl -u goshopify-backup -f
@@ -143,33 +195,6 @@ systemctl status goshopify-backup.timer
 # Enable/disable automatic backups
 systemctl enable goshopify-backup.timer
 systemctl disable goshopify-backup.timer
-```
-
-## Monitoring
-
-### Prometheus Metrics
-
-Metrics are available at `http://localhost:9090/metrics` when metrics server is enabled.
-
-Key metrics:
-- `shopify_backup_last_run_seconds`: Time since last successful backup
-- `shopify_backup_duration_seconds`: Duration of last backup
-- `shopify_backup_records_total`: Total records backed up
-- `shopify_backup_module_success`: Module success status (0 or 1)
-- `shopify_backup_module_duration_seconds`: Duration per module
-
-### Grafana Dashboard
-
-Import `deploy/grafana-dashboard.json` into Grafana for visualization.
-
-### Health Checks
-
-```bash
-# Run health check
-./goshopify-backup --health-check
-
-# Docker health check
-docker run --rm goshopify-backup --health-check
 ```
 
 ## Environment Variables
@@ -197,9 +222,9 @@ The tool implements the following error handling strategy:
 
 | Error Type | Max Retries | Backoff | Fallback |
 |------------|-------------|---------|----------|
-| Network timeout | 3 | Exponential | None |
-| 429 Rate Limit | 3 | Exponential | None |
-| 5xx Server Error | 3 | Exponential | None |
+| Network timeout | 3 | Exponential: 2s, 4s, 8s | None |
+| 429 Rate Limit | 3 | Exponential: 2s, 4s, 8s | None |
+| 5xx Server Error | 3 | Exponential: 2s, 4s, 8s | None |
 | Bulk ACCESS_DENIED | 1 | 5 seconds | REST pagination |
 | Image download | 3 | 1 second | Log and continue |
 
@@ -229,7 +254,7 @@ Ensure the backup directory is writable by the user running the tool.
 # Run all tests
 make test
 
-# Run with coverage
+# Run with coverage report
 make test-coverage
 ```
 
@@ -244,7 +269,25 @@ make lint
 
 # Run vet
 make vet
+
+# Run all checks
+make check
 ```
+
+## Architecture
+
+The project is organized into the following packages:
+
+- `backup/` - Backup modules for each data type
+- `config/` - Environment variable configuration and validation
+- `constants/` - Constants and configuration values
+- `jsonl/` - JSONL parsing and reconstruction for bulk operation results
+- `lock/` - Concurrent execution prevention via lock files
+- `logger/` - Structured JSON logging
+- `recovery/` - Partial backup recovery and resume
+- `shopify/` - Shopify API clients (GraphQL and REST) with rate limiting
+- `status/` - Status file writing and tracking
+- `types/` - Shared type definitions
 
 ## License
 
