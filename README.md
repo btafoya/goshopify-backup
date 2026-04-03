@@ -4,6 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Report Card](https://goreportcard.com/badge/github.com/btafoya/goshopify-backup)](https://goreportcard.com/report/github.com/btafoya/goshopify-backup)
 [![Release](https://img.shields.io/github/v/release/btafoya/goshopify-backup)](https://github.com/btafoya/goshopify-backup/releases)
+[![pkg.go.dev](https://pkg.go.dev/badge/github.com/btafoya/goshopify-backup)](https://pkg.go.dev/github.com/btafoya/goshopify-backup)
 [![Docker Pulls](https://img.shields.io/docker/pulls/btafoya/goshopify-backup)](https://hub.docker.com/r/btafoya/goshopify-backup)
 [![GitHub Downloads](https://img.shields.io/github/downloads/btafoya/goshopify-backup/total)](https://github.com/btafoya/goshopify-backup/releases)
 
@@ -32,6 +33,22 @@ A Go CLI tool that dumps Shopify store data nightly to a directory as flat JSON 
 
 ### Installation
 
+#### Using `go install` (Recommended)
+
+```bash
+# Install the latest version
+go install github.com/btafoya/goshopify-backup@latest
+
+# Install a specific version
+go install github.com/btafoya/goshopify-backup@v1.0.0
+
+# The binary will be installed to $GOPATH/bin or $HOME/go/bin
+# Add to your PATH if needed:
+export PATH=$PATH:$(go env GOPATH)/bin
+```
+
+#### Building from Source
+
 ```bash
 # Clone the repository
 git clone https://github.com/btafoya/goshopify-backup.git
@@ -59,14 +76,17 @@ RETENTION_DAYS=30
 ### Running
 
 ```bash
-# Run backup
+# Run backup (if installed via go install)
+goshopify-backup
+
+# Run backup (if built from source)
 ./bin/goshopify-backup
 
 # Force re-run (override completed modules)
-./bin/goshopify-backup --force
+goshopify-backup --force
 
 # Check health
-./bin/goshopify-backup --health-check
+goshopify-backup --health-check
 
 # Run via Make
 make run
