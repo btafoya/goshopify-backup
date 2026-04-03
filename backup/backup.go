@@ -227,10 +227,10 @@ const (
 
 // ProductsModule backs up products using bulk operations
 type ProductsModule struct {
-	name              string
-	downloadImages    bool
-	imageDir          string
-	imageConcurrency  int
+	name             string
+	downloadImages   bool
+	imageDir         string
+	imageConcurrency int
 }
 
 // NewProductsModule creates a new products backup module

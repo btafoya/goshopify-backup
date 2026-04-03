@@ -279,3 +279,30 @@ func (c *GraphQLClient) DownloadJSONL(ctx context.Context, url string) (io.ReadC
 
 	return resp.Body, nil
 }
+
+// Query executes a generic GraphQL query with the provided JSON payload
+// Used for non-bulk operations like metaobject definitions
+func (c *GraphQLClient) Query(ctx context.Context, payload string) ([]byte, error) {
+	c.limiter.Wait()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint(), strings.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Shopify-Access-Token", c.accessToken)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return io.ReadAll(resp.Body)
+}

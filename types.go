@@ -4,27 +4,27 @@ import "time"
 
 // Config holds all configuration from environment variables
 type Config struct {
-	Store          string
-	AccessToken    string
-	APIVersion     string
-	BackupDir      string
-	RetentionDays  int
-	Force          bool
-	PollTimeout    time.Duration
+	Store         string
+	AccessToken   string
+	APIVersion    string
+	BackupDir     string
+	RetentionDays int
+	Force         bool
+	PollTimeout   time.Duration
 }
 
 // BackupStatus is written to status.json
 type BackupStatus struct {
-	StartedAt    time.Time              `json:"startedAt"`
-	CompletedAt  time.Time              `json:"completedAt,omitempty"`
-	Duration     string                 `json:"duration,omitempty"`
-	Modules      map[string]ModuleStatus `json:"modules"`
-	TotalSize    int64                  `json:"totalSize,omitempty"`
+	StartedAt   time.Time               `json:"startedAt"`
+	CompletedAt time.Time               `json:"completedAt,omitempty"`
+	Duration    string                  `json:"duration,omitempty"`
+	Modules     map[string]ModuleStatus `json:"modules"`
+	TotalSize   int64                   `json:"totalSize,omitempty"`
 }
 
 // ModuleStatus represents the status of a single backup module
 type ModuleStatus struct {
-	Status      string    `json:"status"`      // "pending", "running", "completed", "failed"
+	Status      string    `json:"status"` // "pending", "running", "completed", "failed"
 	StartedAt   time.Time `json:"startedAt"`
 	CompletedAt time.Time `json:"completedAt,omitempty"`
 	Count       int       `json:"count"`

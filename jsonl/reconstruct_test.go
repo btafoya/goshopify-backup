@@ -12,18 +12,18 @@ func TestReconstructBulkData_SimpleOrder(t *testing.T) {
 			"name":       "#1234",
 		},
 		{
-			"id":          "gid://shopify/LineItem/1",
-			"__parentId":  "gid://shopify/Order/123",
-			"__typename":  "LineItem",
-			"title":       "Test Product",
-			"quantity":    2,
+			"id":         "gid://shopify/LineItem/1",
+			"__parentId": "gid://shopify/Order/123",
+			"__typename": "LineItem",
+			"title":      "Test Product",
+			"quantity":   2,
 		},
 		{
-			"id":          "gid://shopify/LineItem/2",
-			"__parentId":  "gid://shopify/Order/123",
-			"__typename":  "LineItem",
-			"title":       "Test Product 2",
-			"quantity":    1,
+			"id":         "gid://shopify/LineItem/2",
+			"__parentId": "gid://shopify/Order/123",
+			"__typename": "LineItem",
+			"title":      "Test Product 2",
+			"quantity":   1,
 		},
 	}
 
@@ -64,22 +64,22 @@ func TestReconstructBulkData_ProductWithVariants(t *testing.T) {
 			"title":      "Test Product",
 		},
 		{
-			"id":          "gid://shopify/ProductVariant/1",
-			"__parentId":  "gid://shopify/Product/1",
-			"__typename":  "ProductVariant",
-			"title":       "Default Title",
+			"id":         "gid://shopify/ProductVariant/1",
+			"__parentId": "gid://shopify/Product/1",
+			"__typename": "ProductVariant",
+			"title":      "Default Title",
 		},
 		{
-			"id":          "gid://shopify/ProductVariant/2",
-			"__parentId":  "gid://shopify/Product/1",
-			"__typename":  "ProductVariant",
-			"title":       "Variant 2",
+			"id":         "gid://shopify/ProductVariant/2",
+			"__parentId": "gid://shopify/Product/1",
+			"__typename": "ProductVariant",
+			"title":      "Variant 2",
 		},
 		{
-			"id":          "gid://shopify/ProductImage/1",
-			"__parentId":  "gid://shopify/Product/1",
-			"__typename":  "ProductImage",
-			"src":         "https://example.com/image.jpg",
+			"id":         "gid://shopify/ProductImage/1",
+			"__parentId": "gid://shopify/Product/1",
+			"__typename": "ProductImage",
+			"src":        "https://example.com/image.jpg",
 		},
 	}
 
@@ -130,11 +130,11 @@ func TestReconstructBulkData_CustomerWithAddress(t *testing.T) {
 			"email":      "test@example.com",
 		},
 		{
-			"id":          "gid://shopify/MailingAddress/1",
-			"__parentId":  "gid://shopify/Customer/1",
-			"__typename":  "MailingAddress",
-			"address1":    "123 Test St",
-			"city":        "Test City",
+			"id":         "gid://shopify/MailingAddress/1",
+			"__parentId": "gid://shopify/Customer/1",
+			"__typename": "MailingAddress",
+			"address1":   "123 Test St",
+			"city":       "Test City",
 		},
 	}
 
@@ -187,9 +187,9 @@ func TestReconstructBulkData_OrphanChild(t *testing.T) {
 			"__typename": "Order",
 		},
 		{
-			"id":          "gid://shopify/LineItem/1",
-			"__parentId":  "gid://shopify/Order/999", // Non-existent parent
-			"__typename":  "LineItem",
+			"id":         "gid://shopify/LineItem/1",
+			"__parentId": "gid://shopify/Order/999", // Non-existent parent
+			"__typename": "LineItem",
 		},
 	}
 

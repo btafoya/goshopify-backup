@@ -19,7 +19,7 @@ import (
 )
 
 // Expected backup modules in execution order
-var expectedModules = []string{"products", "customers", "orders", "collections", "content"}
+var expectedModules = []string{"products", "customers", "orders", "collections", "content", "metaobjects", "redirects"}
 
 func main() {
 	// Load .env file if it exists
@@ -71,8 +71,8 @@ func main() {
 		os.Exit(ExitBackupFailed)
 	}
 
-	// Initialize lock manager
-	lockManager := lock.NewManager(backupDir, StaleLockDuration)
+	// Initialize lock manager (use base backup dir, not date-specific path)
+	lockManager := lock.NewManager(cfg.BackupDir, StaleLockDuration)
 
 	// Acquire lock
 	if !cfg.Force {
@@ -274,7 +274,7 @@ func getDiskInfo(path string) (*DiskInfo, error) {
 	// This is a simplified implementation
 	// In production, use syscall.Statfs on Unix or similar
 	return &DiskInfo{
-		Total:     1 << 40, // 1TB
+		Total:     1 << 40,   // 1TB
 		Available: 500 << 30, // 500GB
 		Used:      500 << 30,
 	}, nil
@@ -365,6 +365,14 @@ func runModules(ctx context.Context, graphqlClient *shopify.GraphQLClient, restC
 		case "content":
 			contentMod := backup.NewContentModule()
 			count, fileSize, err = contentMod.Run(ctx, restClient, outputDir)
+
+		case "metaobjects":
+			metaobjectsMod := backup.NewMetaobjectsModule()
+			count, fileSize, fallback, err = runMetaobjectsWithFallback(ctx, graphqlClient, metaobjectsMod, outputDir)
+
+		case "redirects":
+			redirectsMod := backup.NewRedirectsModule()
+			count, fileSize, fallback, err = runRedirectsWithFallback(ctx, graphqlClient, restClient, redirectsMod, outputDir)
 		}
 
 		duration := time.Since(startTime)
@@ -482,6 +490,33 @@ func runCollectionsWithFallback(ctx context.Context, graphqlClient *shopify.Grap
 			fmt.Printf("[collections] Bulk operation access denied, falling back to REST\n")
 			restFallback := backup.NewRESTFallbackModule("collections", "collections", "/custom_collections.json")
 			count, size, err = restFallback.Run(ctx, restClient, outputDir)
+			if err != nil {
+				return 0, 0, "", err
+			}
+			return count, size, "REST", nil
+		}
+		return 0, 0, "", err
+	}
+	return count, size, "", nil
+}
+
+// runMetaobjectsWithFallback runs metaobjects backup using pagination (bulk requires type argument)
+func runMetaobjectsWithFallback(ctx context.Context, graphqlClient *shopify.GraphQLClient, mod *backup.MetaobjectsModule, outputDir string) (int, int64, string, error) {
+	// Metaobjects uses pagination as primary method since bulk operations require type argument
+	count, size, err := mod.Run(ctx, graphqlClient, outputDir)
+	if err != nil {
+		return 0, 0, "", err
+	}
+	return count, size, "PAGINATION", nil
+}
+
+// runRedirectsWithFallback runs redirects backup with REST fallback
+func runRedirectsWithFallback(ctx context.Context, graphqlClient *shopify.GraphQLClient, restClient *shopify.RESTClient, mod *backup.RedirectsModule, outputDir string) (int, int64, string, error) {
+	count, size, err := mod.Run(ctx, graphqlClient, outputDir)
+	if err != nil {
+		if isAccessDenied(err) {
+			fmt.Printf("[redirects] Bulk operation access denied, falling back to REST\n")
+			count, size, err = mod.RunREST(ctx, restClient, outputDir)
 			if err != nil {
 				return 0, 0, "", err
 			}

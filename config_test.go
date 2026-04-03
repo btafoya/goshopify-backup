@@ -41,9 +41,9 @@ func TestValidateConfig_StoreRequired(t *testing.T) {
 
 func TestValidateConfig_AccessTokenRequired(t *testing.T) {
 	cfg := &Config{
-		Store:        "https://test.myshopify.com",
-		AccessToken:  "",
-		BackupDir:    "/tmp/shopify-test",
+		Store:       "https://test.myshopify.com",
+		AccessToken: "",
+		BackupDir:   "/tmp/shopify-test",
 	}
 
 	err := ValidateConfig(cfg)
@@ -67,10 +67,10 @@ func TestValidateConfig_APIVersionFormat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{
-				Store:        "https://test.myshopify.com",
-				AccessToken:  "test_token",
-				APIVersion:   tt.version,
-				BackupDir:    "/tmp/shopify-test",
+				Store:       "https://test.myshopify.com",
+				AccessToken: "test_token",
+				APIVersion:  tt.version,
+				BackupDir:   "/tmp/shopify-test",
 			}
 			err := ValidateConfig(cfg)
 			if (err != nil) != tt.wantErr {
@@ -85,9 +85,9 @@ func TestValidateConfig_RetentionDaysClamped(t *testing.T) {
 	os.RemoveAll(tmpDir)
 
 	tests := []struct {
-		name   string
-		input  int
-		want   int
+		name  string
+		input int
+		want  int
 	}{
 		{"below minimum", 0, 1},
 		{"negative", -5, 1},

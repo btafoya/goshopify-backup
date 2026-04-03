@@ -7,8 +7,8 @@ const (
 	APIVersion = "2025-01"
 
 	// Rate Limiting
-	RequestsPerSecond   = 40
-	MinRequestInterval  = 25 * time.Millisecond // 1000ms / 40 = 25ms
+	RequestsPerSecond  = 40
+	MinRequestInterval = 25 * time.Millisecond // 1000ms / 40 = 25ms
 
 	// Retry
 	RetryCount     = 3
@@ -16,12 +16,12 @@ const (
 	RetryMaxDelay  = 30 * time.Second
 
 	// Bulk Operations
-	PollInterval  = 1 * time.Second
-	PollTimeout   = 10 * time.Minute
+	PollInterval = 1 * time.Second
+	PollTimeout  = 10 * time.Minute
 
 	// Image Download
-	ImageConcurrency  = 10
-	ImageMaxRetries   = 3
+	ImageConcurrency = 10
+	ImageMaxRetries  = 3
 
 	// Status Writer
 	StatusFlushInterval = 5 * time.Second
@@ -44,8 +44,8 @@ var AllowedDomains = []string{
 
 // Exit codes
 const (
-	ExitSuccess           = 0
-	ExitBackupFailed      = 1
-	ExitConfigError       = 2
-	ExitConcurrentRun     = 3
+	ExitSuccess       = 0
+	ExitBackupFailed  = 1
+	ExitConfigError   = 2
+	ExitConcurrentRun = 3
 )

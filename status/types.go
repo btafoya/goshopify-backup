@@ -4,7 +4,7 @@ import "time"
 
 // ModuleStatus represents the status of a single backup module
 type ModuleStatus struct {
-	Status      string    `json:"status"`      // "pending", "running", "completed", "failed"
+	Status      string    `json:"status"` // "pending", "running", "completed", "failed"
 	StartedAt   time.Time `json:"startedAt"`
 	CompletedAt time.Time `json:"completedAt,omitempty"`
 	Count       int       `json:"count"`
@@ -15,11 +15,11 @@ type ModuleStatus struct {
 
 // BackupStatus is written to status.json
 type BackupStatus struct {
-	StartedAt    time.Time                 `json:"startedAt"`
-	CompletedAt  time.Time                 `json:"completedAt,omitempty"`
-	Duration     string                    `json:"duration,omitempty"`
-	Modules      map[string]ModuleStatus  `json:"modules"`
-	TotalSize    int64                     `json:"totalSize,omitempty"`
+	StartedAt   time.Time               `json:"startedAt"`
+	CompletedAt time.Time               `json:"completedAt,omitempty"`
+	Duration    string                  `json:"duration,omitempty"`
+	Modules     map[string]ModuleStatus `json:"modules"`
+	TotalSize   int64                   `json:"totalSize,omitempty"`
 }
 
 // StatusUpdate represents a single status change
@@ -36,8 +36,8 @@ type StatusUpdate struct {
 // NewBackupStatus creates a new backup status
 func NewBackupStatus() *BackupStatus {
 	return &BackupStatus{
-		StartedAt:   time.Now().UTC(),
-		Modules:     make(map[string]ModuleStatus),
+		StartedAt: time.Now().UTC(),
+		Modules:   make(map[string]ModuleStatus),
 	}
 }
 

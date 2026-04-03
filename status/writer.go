@@ -11,22 +11,22 @@ import (
 // Writer is a buffered channel-based status file writer
 // Batches updates and flushes every 5 seconds or on module completion
 type Writer struct {
-	status       *BackupStatus
-	mu           sync.Mutex
-	outputDir    string
+	status        *BackupStatus
+	mu            sync.Mutex
+	outputDir     string
 	flushInterval time.Duration
-	done         chan struct{}
-	initialized  bool
+	done          chan struct{}
+	initialized   bool
 }
 
 // NewWriter creates a buffered status writer
 func NewWriter(outputDir string, flushInterval time.Duration) *Writer {
 	return &Writer{
-		status:       NewBackupStatus(),
-		outputDir:    outputDir,
+		status:        NewBackupStatus(),
+		outputDir:     outputDir,
 		flushInterval: flushInterval,
-		done:         make(chan struct{}),
-		initialized:  false,
+		done:          make(chan struct{}),
+		initialized:   false,
 	}
 }
 

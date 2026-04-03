@@ -6,7 +6,7 @@ A Go CLI tool that dumps Shopify store data nightly to a directory as flat JSON 
 
 - **Bulk API Operations**: Uses Shopify GraphQL bulk operations for efficient data export
 - **REST Fallback**: Automatically falls back to REST API if bulk operations are denied
-- **Multiple Data Types**: Backs up products, customers, orders, collections, pages, blogs, and metafields
+- **Multiple Data Types**: Backs up products, customers, orders, collections, pages, blogs, metafields, metaobjects, and URL redirects
 - **Concurrent Protection**: Lock file prevents multiple backups from running simultaneously
 - **Partial Recovery**: Resumes from incomplete backups after interruption
 - **Retention Policy**: Automatically cleans up old backups
@@ -72,6 +72,11 @@ RETENTION_DAYS=30
 ├── pages.json           # Store pages
 ├── blogs.json           # Blogs and articles
 ├── metafields.json      # Shop-level metafields
+├── url-redirects.json   # URL redirects
+├── metaobjects/         # Metaobject definitions and entries
+│   ├── metaobject-definitions.json
+│   ├── {type}.json      # Per metaobject type (e.g., size_chart.json)
+│   └── ...
 └── images/               # Product images
     └── {product_id}/
         ├── 0.jpg

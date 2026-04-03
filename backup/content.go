@@ -12,57 +12,57 @@ import (
 
 // REST API types for content backup
 type Page struct {
-	ID           int64     `json:"id"`
-	Title        string    `json:"title"`
-	BodyHTML     string    `json:"body_html"`
-	Handle       string    `json:"handle"`
-	Author       string    `json:"author"`
-	CreatedAt    string    `json:"created_at"`
-	UpdatedAt    string    `json:"updated_at"`
-	TemplateSuffix string  `json:"template_suffix"`
-	PublishedAt  string    `json:"published_at"`
-	ShopifyThemeID int64   `json:"shopify_theme_id"`
+	ID             int64  `json:"id"`
+	Title          string `json:"title"`
+	BodyHTML       string `json:"body_html"`
+	Handle         string `json:"handle"`
+	Author         string `json:"author"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	TemplateSuffix string `json:"template_suffix"`
+	PublishedAt    string `json:"published_at"`
+	ShopifyThemeID int64  `json:"shopify_theme_id"`
 }
 
 type Blog struct {
-	ID             int64     `json:"id"`
-	Title          string    `json:"title"`
-	Handle         string    `json:"handle"`
+	ID                int64  `json:"id"`
+	Title             string `json:"title"`
+	Handle            string `json:"handle"`
 	AdminGraphqlAPIID string `json:"admin_graphql_api_id"`
-	Commentable     string   `json:"commentable"`
-	CreatedAt      string    `json:"created_at"`
-	UpdatedAt      string    `json:"updated_at"`
-	Tags           string    `json:"tags"`
-	TemplateSuffix string    `json:"template_suffix"`
+	Commentable       string `json:"commentable"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
+	Tags              string `json:"tags"`
+	TemplateSuffix    string `json:"template_suffix"`
 }
 
 type Article struct {
-	ID              int64     `json:"id"`
-	Title           string    `json:"title"`
-	Author          string    `json:"author"`
-	BodyHTML        string    `json:"body_html"`
-	Handle          string    `json:"handle"`
-	BlogID          int64     `json:"blog_id"`
-	CreatedAt       string    `json:"created_at"`
-	UpdatedAt       string    `json:"updated_at"`
-	PublishedAt     string    `json:"published_at"`
-	TemplateSuffix  string    `json:"template_suffix"`
-	AdminGraphqlAPIID string  `json:"admin_graphql_api_id"`
-	UserID          int64     `json:"user_id"`
-	SummaryHTML     string    `json:"summary_html"`
-	Tags            string    `json:"tags"`
+	ID                int64  `json:"id"`
+	Title             string `json:"title"`
+	Author            string `json:"author"`
+	BodyHTML          string `json:"body_html"`
+	Handle            string `json:"handle"`
+	BlogID            int64  `json:"blog_id"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
+	PublishedAt       string `json:"published_at"`
+	TemplateSuffix    string `json:"template_suffix"`
+	AdminGraphqlAPIID string `json:"admin_graphql_api_id"`
+	UserID            int64  `json:"user_id"`
+	SummaryHTML       string `json:"summary_html"`
+	Tags              string `json:"tags"`
 }
 
 type ShopMetafield struct {
-	ID         int64  `json:"id"`
-	Namespace  string `json:"namespace"`
-	Key        string `json:"key"`
-	Value      string `json:"value"`
-	Type       string `json:"type"`
-	OwnerID    int64  `json:"owner_id"`
+	ID            int64  `json:"id"`
+	Namespace     string `json:"namespace"`
+	Key           string `json:"key"`
+	Value         string `json:"value"`
+	Type          string `json:"type"`
+	OwnerID       int64  `json:"owner_id"`
 	OwnerResource string `json:"owner_resource"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 // ContentModule backs up pages, blogs, articles, and shop metafields using REST API
@@ -210,9 +210,9 @@ func (m *ContentModule) backupShopMetafields(ctx context.Context, restClient *sh
 
 // RESTFallbackModule provides REST API fallback for bulk operations
 type RESTFallbackModule struct {
-	name      string
-	entity    string
-	endpoint  string
+	name     string
+	entity   string
+	endpoint string
 }
 
 // NewRESTFallbackModule creates a new REST fallback module

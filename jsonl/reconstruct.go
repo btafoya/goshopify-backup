@@ -9,14 +9,14 @@ import (
 // GID type prefixes for routing children to parents
 const (
 	GIDLineItem         = "gid://shopify/LineItem/"
-	GIDOrderTransaction  = "gid://shopify/OrderTransaction/"
+	GIDOrderTransaction = "gid://shopify/OrderTransaction/"
 	GIDOrderFulfillment = "gid://shopify/Fulfillment/"
-	GIDOrderRefund       = "gid://shopify/Refund/"
-	GIDProductVariant    = "gid://shopify/ProductVariant/"
-	GIDProductImage      = "gid://shopify/ProductImage/"
-	GIDMetafield         = "gid://shopify/Metafield/"
-	GIDCustomerAddress   = "gid://shopify/MailingAddress/"
-	GIDCollection        = "gid://shopify/Collection/"
+	GIDOrderRefund      = "gid://shopify/Refund/"
+	GIDProductVariant   = "gid://shopify/ProductVariant/"
+	GIDProductImage     = "gid://shopify/ProductImage/"
+	GIDMetafield        = "gid://shopify/Metafield/"
+	GIDCustomerAddress  = "gid://shopify/MailingAddress/"
+	GIDCollection       = "gid://shopify/Collection/"
 )
 
 // ReconstructBulkData takes flat JSONL records and builds nested structures
