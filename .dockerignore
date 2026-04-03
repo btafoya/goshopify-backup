@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+docs/
+prd/
+README*
+
+# Tests
+*_test.go
+testdata/
+.coverage
+
+# Development
+.env.local
+.env.*.local
+.vscode/
+.idea/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Build artifacts
+*.o
+*.a
+*.so
+goshopify-backup
+*.test
+*.out
+
+# Backups (exclude from image)
+backups/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

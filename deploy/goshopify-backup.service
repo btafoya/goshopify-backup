@@ -1,0 +1,40 @@
+[Unit]
+Description=Shopify Backup Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=shopify-backup
+Group=shopify-backup
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+WorkingDirectory=/opt/goshopify-backup
+EnvironmentFile=/opt/goshopify-backup/.env
+ExecStart=/opt/goshopify-backup/goshopify-backup
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=goshopify-backup
+
+# Timeout for backup operations
+TimeoutSec=3600
+
+# Only start if system has enough resources
+MemoryMax=512M
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/goshopify-backup/backups
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Restart policy for failures
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

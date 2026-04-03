@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Shopify backup daily
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+# Run daily at 2am UTC
+Persistent=true
+# Run immediately if last run was missed
+AccuracySec=1h
+
+[Install]
+WantedBy=timers.target

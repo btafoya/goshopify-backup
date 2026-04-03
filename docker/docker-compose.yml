@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  shopify-backup:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: goshopify-backup
+    restart: unless-stopped
+    environment:
+      - SHOPIFY_STORE=${SHOPIFY_STORE}
+      - SHOPIFY_ACCESS_TOKEN=${SHOPIFY_ACCESS_TOKEN}
+      - SHOPIFY_API_VERSION=${SHOPIFY_API_VERSION:-2025-01}
+      - BACKUP_DIR=/backups
+      - RETENTION_DAYS=${RETENTION_DAYS:-30}
+      - TZ=UTC
+    volumes:
+      - shopify-backups:/backups
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    # Run once daily at 2am UTC
+    command: >
+      sh -c "
+      while true; do
+        current_hour=\$(date -u +%H)
+        if [ \"\$current_hour\" = \"02\" ]; then
+          /app/goshopify-backup
+          sleep 3600  # Wait 1 hour after running
+        else
+          sleep 300  # Check every 5 minutes
+        fi
+      done
+      "
+
+volumes:
+  shopify-backups:
+    driver: local
