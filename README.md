@@ -3,9 +3,7 @@
 [![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://go.dev/dl/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Report Card](https://goreportcard.com/badge/github.com/btafoya/goshopify-backup)](https://goreportcard.com/report/github.com/btafoya/goshopify-backup)
-[![Release](https://img.shields.io/github/v/release/btafoya/goshopify-backup)](https://github.com/btafoya/goshopify-backup/releases)
 [![pkg.go.dev](https://pkg.go.dev/badge/github.com/btafoya/goshopify-backup)](https://pkg.go.dev/github.com/btafoya/goshopify-backup)
-[![Docker Pulls](https://img.shields.io/docker/pulls/btafoya/goshopify-backup)](https://hub.docker.com/r/btafoya/goshopify-backup)
 [![GitHub Downloads](https://img.shields.io/github/downloads/btafoya/goshopify-backup/total)](https://github.com/btafoya/goshopify-backup/releases)
 
 A Go CLI tool that dumps Shopify store data nightly to a directory as flat JSON files.
