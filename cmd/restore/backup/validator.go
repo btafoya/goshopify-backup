@@ -109,7 +109,7 @@ func (v *Validator) isBackupComplete(status *BackupStatus) bool {
 	}
 
 	// Check if all modules completed successfully (or at least have data)
-	for moduleName, moduleStatus := range status.Modules {
+	for _, moduleStatus := range status.Modules {
 		if moduleStatus.Status == "failed" {
 			// Failed modules don't invalidate the backup
 			continue

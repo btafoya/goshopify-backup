@@ -1,36 +1,34 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/joho/godotenv"
 )
 
-var (
-	showHelp    bool
-	showVersion bool
-)
-
-func init() {
-	flag.BoolVar(&showHelp, "help", false, "Show help")
-	flag.BoolVar(&showHelp, "h", false, "Show help")
-	flag.BoolVar(&showVersion, "version", false, "Show version")
-	flag.BoolVar(&showVersion, "v", false, "Show version")
+// loadEnv loads .env file if it exists
+func loadEnv() error {
+	return godotenv.Load()
 }
 
 func main() {
-	flag.Parse()
-
-	if showHelp {
-		printHelp()
-		os.Exit(0)
+	// Load .env file if it exists
+	if err := loadEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load .env file: %v\n", err)
 	}
 
-	if showVersion {
-		printVersion()
-		os.Exit(0)
+	// Parse help and version flags manually (since other flags are parsed in GetConfig)
+	for _, arg := range os.Args[1:] {
+		if arg == "--help" || arg == "-h" {
+			printHelp()
+			os.Exit(0)
+		}
+		if arg == "--version" || arg == "-v" {
+			printVersion()
+			os.Exit(0)
+		}
 	}
 
 	// Load configuration

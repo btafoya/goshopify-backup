@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"github.com/btafoya/goshopify-restore/backup"
+	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -149,6 +152,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.restoreResults = msg.results
 		m.state = StateComplete
 		return m, nil
+		case previewGeneratedMsg:
+			m.previewChanges = msg.changes
+			m.state = StatePreview
+			return m, nil
+		case itemsLoadedMsg:
+			state := m.entityStates[msg.entityType]
+			state.items = msg.items
+			state.filtered = make([]Item, len(msg.items))
+			copy(state.filtered, msg.items)
+			state.cursor = 0
+			state.scroll = 0
+			m.entityStates[msg.entityType] = state
+			return m, nil
+
 	case filterTextChangedMsg:
 		m.applyFilter(msg.text)
 		return m, nil
@@ -226,9 +243,7 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.quit = true
 		return m, tea.Quit
 	case "enter":
-		if len(m.backupList) > 0 {
-			m.state = StateBackupSelect
-		}
+		m.state = StateItemSelect
 	}
 	return m, nil
 }
@@ -248,11 +263,7 @@ func (m Model) handleBackupSelectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.backupIndex++
 		}
 	case "enter":
-		if m.backupIndex < len(m.backupList) {
-			m.selectedDate = m.backupList[m.backupIndex].Date.Format("2006-01-02")
-			m.state = StateEntitySelect
-			m.activeEntity = EntityProducts
-		}
+		m.state = StateItemSelect
 	}
 	return m, nil
 }
@@ -282,6 +293,7 @@ func (m Model) handleEntitySelectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	case "enter":
 		m.state = StateItemSelect
+		return m, loadItemsCmd(m.backupDir, m.selectedDate, m.activeEntity)
 	case "esc":
 		m.state = StateBackupSelect
 	}
@@ -317,9 +329,10 @@ func (m Model) handleItemSelectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		for _, item := range state.filtered {
 			state.selected[item.ID] = true
 		}
-	case "enter":
-		m.state = StatePreview
-		return m, generatePreviewCmd
+		case "enter":
+			m.state = StatePreview
+			return m, generatePreviewCmd
+
 	case "/":
 		m.filterBar.Activate()
 		return m, nil
@@ -350,6 +363,7 @@ func (m Model) handlePreviewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 	return m, nil
 }
+
 
 // handleConfirmKey handles keys in confirm state
 func (m Model) handleConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -581,7 +595,59 @@ func (m Model) itemSelectView() string {
 }
 
 func (m Model) previewView() string {
-	return "Generating preview..."
+	var b strings.Builder
+
+	// Summary
+	totalItems := m.countSelectedItems()
+	b.WriteString(lipgloss.NewStyle().
+		Foreground(colorInfo).
+		Render(fmt.Sprintf("Preview: %d item(s) selected for restore\n\n", totalItems)))
+
+	// Group by entity type
+	entityGroups := make(map[EntityType][]Item)
+	for entityType, state := range m.entityStates {
+		for id := range state.selected {
+			for _, item := range state.items {
+				if item.ID == id {
+					entityGroups[entityType] = append(entityGroups[entityType], item)
+					break
+				}
+			}
+		}
+	}
+
+	// Show items by entity type
+	for entityType, items := range entityGroups {
+		b.WriteString(lipgloss.NewStyle().
+			Bold(true).
+			Render(EntityDisplayNames[entityType]))
+		b.WriteString(fmt.Sprintf(" (%d items)\n", len(items)))
+
+		// Show up to 5 items
+		showCount := min(5, len(items))
+		for i := 0; i < showCount; i++ {
+			b.WriteString(fmt.Sprintf("  • %s\n", items[i].Title))
+		}
+		if len(items) > 5 {
+			b.WriteString(fmt.Sprintf("  ... and %d more\n", len(items)-5))
+		}
+		b.WriteString("\n")
+	}
+
+	// Target info
+	if m.cfg.Store != "" {
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(colorDim).
+			Render(fmt.Sprintf("Target: %s\n", m.cfg.Store)))
+	}
+
+	if m.cfg.DryRun {
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(colorWarning).
+			Render("\nDRY-RUN MODE - No actual changes will be made"))
+	}
+
+	return m.renderView("Preview Changes", b.String())
 }
 
 func (m Model) confirmView() string {
@@ -640,21 +706,163 @@ type filterTextChangedMsg struct {
 	text string
 }
 
+type itemsLoadedMsg struct {
+	entityType EntityType
+	items      []Item
+}
+
+type previewGeneratedMsg struct {
+	changes []PreviewChange
+}
+
 func loadBackupsCmd(dir string) tea.Cmd {
 	return func() tea.Msg {
-		// TODO: Implement actual backup loading
-		return backupsLoadedMsg{backups: []BackupInfo{}}
+		loader := backup.NewLoader(dir)
+		backupLoaderBackups, err := loader.ListBackups()
+		if err != nil {
+			return errorMsg(fmt.Sprintf("Failed to load backups: %v", err))
+		}
+
+		// Convert backup.BackupInfo to main.BackupInfo
+		backups := make([]BackupInfo, len(backupLoaderBackups))
+		for i, b := range backupLoaderBackups {
+			backups[i] = BackupInfo{
+				Date:     b.Date,
+				Path:     b.Path,
+				Status:   convertBackupStatus(b.Status),
+				FileSize: b.FileSize,
+			}
+		}
+
+		return backupsLoadedMsg{backups: backups}
+	}
+}
+
+// convertBackupStatus converts backup.BackupStatus to main.BackupStatus
+func convertBackupStatus(status *backup.BackupStatus) *BackupStatus {
+	if status == nil {
+		return nil
+	}
+	return &BackupStatus{
+		StartedAt:   status.StartedAt,
+		CompletedAt: status.CompletedAt,
+		Duration:    status.Duration,
+		Modules:     convertModuleStatuses(status.Modules),
+		TotalSize:   status.TotalSize,
+	}
+}
+
+// convertModuleStatuses converts module status map
+func convertModuleStatuses(modules map[string]backup.ModuleStatus) map[string]ModuleStatus {
+	result := make(map[string]ModuleStatus)
+	for k, v := range modules {
+		result[k] = ModuleStatus{
+			Status:      v.Status,
+			StartedAt:   v.StartedAt,
+			CompletedAt: v.CompletedAt,
+			Count:       v.Count,
+			Error:       v.Error,
+			FileSize:    v.FileSize,
+		}
+	}
+	return result
+}
+
+// loadItemsCmd loads items for a specific entity type from backup
+func loadItemsCmd(backupDir, date string, entityType EntityType) tea.Cmd {
+	return func() tea.Msg {
+		loader := backup.NewLoader(backupDir)
+		backupItems, err := loader.LoadEntity(date, backup.EntityType(entityType))
+		if err != nil {
+			return errorMsg(fmt.Sprintf("Failed to load %s: %v", entityType, err))
+		}
+
+		// Convert backup.Item to main.Item with Type field
+		items := make([]Item, len(backupItems))
+		for i, bi := range backupItems {
+			items[i] = convertBackupItem(bi, entityType)
+		}
+
+		return itemsLoadedMsg{
+			entityType: entityType,
+			items:      items,
+		}
+	}
+}
+
+// convertBackupItem converts a backup.Item to main.Item with Type
+func convertBackupItem(bi backup.Item, entityType EntityType) Item {
+	return Item{
+		ID:         bi.ID,
+		Title:      bi.Title,
+		Handle:     bi.Handle,
+		CreatedAt:  bi.CreatedAt,
+		UpdatedAt:  bi.UpdatedAt,
+		Status:     bi.Status,
+		Tags:       bi.Tags,
+		CustomData: bi.CustomData,
+		Type:       entityType,
+		Price:      bi.Price,
+		VariantCount: bi.VariantCount,
+		Email:      bi.Email,
+		OrderNumber: bi.OrderNumber,
+		FinancialStatus: bi.FinancialStatus,
+		FulfillmentStatus: bi.FulfillmentStatus,
+		ProductsCount: bi.ProductsCount,
 	}
 }
 
 var generatePreviewCmd tea.Cmd = func() tea.Msg {
-	// TODO: Implement preview generation
-	return nil
+	// Preview is generated by checking what items are selected
+	// For now, just transition to preview state
+	// In a real implementation, this would check for conflicts
+	return previewGeneratedMsg{changes: []PreviewChange{}}
 }
 
 func startRestoreCmd(m Model) tea.Cmd {
 	return func() tea.Msg {
-		// TODO: Implement restore execution
-		return restoreCompleteMsg{results: []RestoreResult{}}
+		// Collect all selected items
+		var selectedItems []Item
+		for entityType, state := range m.entityStates {
+			for id := range state.selected {
+				for _, item := range state.items {
+					if item.ID == id {
+						item.Type = entityType
+						selectedItems = append(selectedItems, item)
+						break
+					}
+				}
+			}
+		}
+
+		if len(selectedItems) == 0 {
+			return errorMsg("No items selected for restore")
+		}
+
+		// In dry run mode, just return success
+		if m.cfg.DryRun {
+			results := make([]RestoreResult, len(selectedItems))
+			for i, item := range selectedItems {
+				results[i] = RestoreResult{
+					EntityType: item.Type,
+					ItemID:     item.ID,
+					Success:    true,
+					Message:    "Dry run - would be restored",
+				}
+			}
+			return restoreCompleteMsg{results: results}
+		}
+
+		// Real restore execution
+		client := NewShopifyClient(m.cfg.Store, m.cfg.AccessToken, m.cfg.APIVersion, m.cfg.DryRun)
+		executor := NewRestoreExecutor(client, ConflictSkip)
+
+		ctx := context.Background()
+		results, err := executor.ExecuteRestore(ctx, selectedItems)
+		if err != nil {
+			return errorMsg(fmt.Sprintf("Restore failed: %v", err))
+		}
+
+		return restoreCompleteMsg{results: results}
 	}
 }
