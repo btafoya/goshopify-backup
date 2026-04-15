@@ -25,7 +25,7 @@ func main() {
 			printHelp()
 			os.Exit(0)
 		}
-		if arg == "--version" || arg == "-v" {
+		if arg == "--version" || arg == "-V" {
 			printVersion()
 			os.Exit(0)
 		}
@@ -71,7 +71,7 @@ OPTIONS:
     --images-restore      Always restore product images
     --images-skip         Always skip product images
     --help, -h            Show this help message
-    --version, -v         Show version
+    --version, -V         Show version
 
 ENVIRONMENT VARIABLES:
     SHOPIFY_STORE         Target store URL (https://*.myshopify.com)

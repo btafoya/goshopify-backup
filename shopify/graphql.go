@@ -27,6 +27,7 @@ type CurrentBulkOperationResponse struct {
 	Data struct {
 		CurrentBulkOperation *BulkOperation `json:"currentBulkOperation"`
 	} `json:"data"`
+	Errors []GraphQLError `json:"errors,omitempty"`
 }
 
 type BulkOperation struct {
@@ -42,6 +43,52 @@ type BulkOperation struct {
 type UserError struct {
 	Field   []string `json:"field"`
 	Message string   `json:"message"`
+}
+
+// GraphQLError represents a top-level error in a GraphQL response.
+// Shopify returns these for throttling/cost errors, access denied, and
+// query validation failures. They are distinct from userErrors which
+// appear inside mutation data.
+type GraphQLError struct {
+	Message   string `json:"message"`
+	Locations []struct {
+		Line   int `json:"line"`
+		Column int `json:"column"`
+	} `json:"locations"`
+	Path []interface{} `json:"path,omitempty"`
+}
+
+// Error implements the error interface for GraphQLError
+func (e GraphQLError) Error() string {
+	if len(e.Path) > 0 {
+		return fmt.Sprintf("graphql error: %s (path: %v)", e.Message, e.Path)
+	}
+	return fmt.Sprintf("graphql error: %s", e.Message)
+}
+
+// GraphQLResponse is a minimal envelope for checking top-level errors
+// in a raw GraphQL response before callers unmarshal the data field
+// into their own structs.
+type GraphQLResponse struct {
+	Data   json.RawMessage `json:"data"`
+	Errors []GraphQLError  `json:"errors,omitempty"`
+}
+
+// GraphQLErrorGroup wraps multiple GraphQL errors into a single error.
+type GraphQLErrorGroup struct {
+	Errors []GraphQLError
+}
+
+// Error implements the error interface for GraphQLErrorGroup
+func (g *GraphQLErrorGroup) Error() string {
+	if len(g.Errors) == 1 {
+		return g.Errors[0].Error()
+	}
+	msgs := make([]string, len(g.Errors))
+	for i, e := range g.Errors {
+		msgs[i] = e.Error()
+	}
+	return fmt.Sprintf("graphql errors (%d): %s", len(g.Errors), strings.Join(msgs, "; "))
 }
 
 // BulkOperationStatus represents the status of a bulk operation
@@ -159,10 +206,15 @@ func (c *GraphQLClient) SubmitBulkOperation(ctx context.Context, query string) (
 				} `json:"userErrors"`
 			} `json:"bulkOperationRunQuery"`
 		} `json:"data"`
+		Errors []GraphQLError `json:"errors,omitempty"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if len(result.Errors) > 0 {
+		return "", &GraphQLErrorGroup{Errors: result.Errors}
 	}
 
 	if len(result.Data.BulkOperationRunQuery.UserErrors) > 0 {
@@ -232,6 +284,10 @@ func (c *GraphQLClient) PollBulkOperation(ctx context.Context, pollInterval, tim
 			return "", fmt.Errorf("failed to decode response: %w", err)
 		}
 		resp.Body.Close()
+
+		if len(result.Errors) > 0 {
+			return "", &GraphQLErrorGroup{Errors: result.Errors}
+		}
 
 		op := result.Data.CurrentBulkOperation
 		if op == nil {
@@ -304,5 +360,20 @@ func (c *GraphQLClient) Query(ctx context.Context, payload string) ([]byte, erro
 		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
-	return io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Check for GraphQL-level errors (Shopify returns HTTP 200 with errors)
+	var gqlResp GraphQLResponse
+	if err := json.Unmarshal(body, &gqlResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal graphql response: %w", err)
+	}
+
+	if len(gqlResp.Errors) > 0 {
+		return body, &GraphQLErrorGroup{Errors: gqlResp.Errors}
+	}
+
+	return body, nil
 }

@@ -117,6 +117,8 @@ func (l *Loader) LoadEntity(date string, entityType EntityType) ([]Item, error) 
 		filePath = filepath.Join(backupPath, "orders.json")
 	case EntityCollections:
 		filePath = filepath.Join(backupPath, "collections.json")
+	case EntityMetaobjects:
+		return l.loadMetaobjectItems(backupPath)
 	default:
 		return nil, fmt.Errorf("unsupported entity type: %s", entityType)
 	}
@@ -130,6 +132,99 @@ func (l *Loader) LoadEntity(date string, entityType EntityType) ([]Item, error) 
 	}
 
 	return l.parseItems(data, entityType)
+}
+
+// loadMetaobjectItems loads metaobject entries from the metaobjects subdirectory (D6)
+func (l *Loader) loadMetaobjectItems(backupPath string) ([]Item, error) {
+	metaobjectsDir := filepath.Join(backupPath, "metaobjects")
+	if _, err := os.Stat(metaobjectsDir); os.IsNotExist(err) {
+		return []Item{}, nil
+	}
+
+	// Load definitions first
+	defsPath := filepath.Join(metaobjectsDir, "metaobject-definitions.json")
+	defsData, err := os.ReadFile(defsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []Item{}, nil
+		}
+		return nil, fmt.Errorf("failed to read metaobject definitions: %w", err)
+	}
+
+	var definitions []MetaobjectDefinition
+	if err := json.Unmarshal(defsData, &definitions); err != nil {
+		return nil, fmt.Errorf("failed to parse metaobject definitions: %w", err)
+	}
+
+	var items []Item
+
+	// Create items from definitions (for definition restore)
+	for _, def := range definitions {
+		items = append(items, Item{
+			ID:    def.ID,
+			Title: def.Name,
+			Handle: def.Type,
+			Status: "active",
+			CustomData: map[string]interface{}{
+				"definitionType":     def.Type,
+				"fieldDefinitions":   def.FieldDefinitions,
+				"isDefinition":       true,
+			},
+		})
+	}
+
+	// Load entries per type
+	entries, err := os.ReadDir(metaobjectsDir)
+	if err != nil {
+		return items, nil // Return definitions even if entries fail
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		if entry.Name() == "metaobject-definitions.json" {
+			continue
+		}
+
+		// Entry files are named {type}.json
+		typeName := strings.TrimSuffix(entry.Name(), ".json")
+		entryPath := filepath.Join(metaobjectsDir, entry.Name())
+
+		data, err := os.ReadFile(entryPath)
+		if err != nil {
+			continue
+		}
+
+		var metaobjectEntries []MetaobjectEntry
+		if err := json.Unmarshal(data, &metaobjectEntries); err != nil {
+			continue
+		}
+
+		for _, me := range metaobjectEntries {
+			// Convert fields to map for Item
+			fields := make(map[string]interface{})
+			for _, f := range me.Fields {
+				fields[f.Key] = f.Value
+			}
+
+			defType := typeName
+			items = append(items, Item{
+				ID:    me.ID,
+				Title: me.Handle,
+				Handle: me.Handle,
+				Status: "active",
+				CustomData: map[string]interface{}{
+					"metaobjectDefinition": defType,
+					"metaobjectKey":       me.Handle,
+					"metaobjectFields":    fields,
+					"isEntry":             true,
+				},
+			})
+		}
+	}
+
+	return items, nil
 }
 
 // parseItems parses JSON data into Item slice
@@ -280,6 +375,12 @@ type Item struct {
 	FulfillmentStatus *string
 	ProductsCount *int
 	Type       *string
+	// Rich data fields for restore
+	Variants    []ProductVariant
+	Metafields  []Metafield
+	Addresses   []CustomerAddress
+	CollectionProducts []string // Product GIDs
+	Images      []ProductImage
 }
 
 // Product entity types
@@ -309,6 +410,9 @@ func (p *Product) ToItem() Item {
 		Status:     p.Status,
 		Tags:       p.Tags,
 		CustomData: make(map[string]interface{}),
+		Variants:   p.Variants,
+		Metafields: p.Metafields,
+		Images:     p.Images,
 	}
 
 	if len(p.Variants) > 0 {
@@ -367,6 +471,8 @@ func (c *Customer) ToItem() Item {
 		Email:      &c.Email,
 		Tags:       c.Tags(),
 		CustomData: make(map[string]interface{}),
+		Addresses:  c.Addresses,
+		Metafields: c.Metafields,
 	}
 }
 
@@ -492,16 +598,22 @@ type Collection struct {
 
 func (c *Collection) ToItem() Item {
 	count := len(c.Products)
+	productIDs := make([]string, len(c.Products))
+	for i, p := range c.Products {
+		productIDs[i] = p.ID
+	}
 	return Item{
-		ID:           c.ID,
-		Title:        c.Title,
-		Handle:       c.Handle,
-		CreatedAt:    c.CreatedAt,
-		UpdatedAt:    c.UpdatedAt,
-		Status:       "active",
-		ProductsCount: &count,
-		Tags:         []string{},
-		CustomData:   make(map[string]interface{}),
+		ID:                c.ID,
+		Title:             c.Title,
+		Handle:            c.Handle,
+		CreatedAt:         c.CreatedAt,
+		UpdatedAt:         c.UpdatedAt,
+		Status:            "active",
+		ProductsCount:     &count,
+		Tags:              []string{},
+		CustomData:        make(map[string]interface{}),
+		CollectionProducts: productIDs,
+		Metafields:        c.Metafields,
 	}
 }
 

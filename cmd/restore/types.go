@@ -131,7 +131,9 @@ type Item struct {
 	Vendor        string
 	Price         *string
 	VariantCount  *int
+	Variants      []ProductVariant
 	Images        []Image
+	Metafields    []Metafield
 	SEO           *SEOInfo
 
 	// Customer-specific fields
@@ -140,6 +142,7 @@ type Item struct {
 	LastName    string
 	Phone       string
 	OrderCount  *int
+	Addresses   []CustomerAddress
 
 	// Order-specific fields
 	OrderNumber      *string
@@ -153,6 +156,7 @@ type Item struct {
 
 	// Collection-specific fields
 	ProductsCount   *int
+	CollectionProducts []string // Product GIDs from backup
 	CollectionRules []interface{}
 
 	// Metaobject-specific fields

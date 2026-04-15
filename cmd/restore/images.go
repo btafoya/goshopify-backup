@@ -16,30 +16,49 @@ import (
 
 // ImageUploader handles image upload to Shopify
 type ImageUploader struct {
-	client *ShopifyClient
-	logger *log.Logger
+	client     *ShopifyClient
+	logger     *log.Logger
+	backupDir  string    // Backup directory for resolving local image paths (O9)
+	imagePolicy ImagePolicy // Image handling policy (O7)
 }
 
 // Image represents an image to upload
 type Image struct {
-	Source      string `json:"src"`      // URL or local path
-	AltText     string `json:"altText"`
-	Position    int    `json:"position"`
-	Width       int    `json:"width"`
-	Height      int    `json:"height"`
-	OriginalID  string `json:"-"`        // Original ID from backup
+	Source     string `json:"src"`      // URL or local path
+	AltText    string `json:"altText"`
+	Position   int    `json:"position"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	OriginalID string `json:"-"`       // Original ID from backup
 }
 
 // NewImageUploader creates a new image uploader
 func NewImageUploader(client *ShopifyClient) *ImageUploader {
 	return &ImageUploader{
-		client: client,
-		logger: log.New(os.Stderr),
+		client:      client,
+		logger:       log.New(os.Stderr),
+		imagePolicy:  ImageInteractive, // Default
 	}
+}
+
+// SetBackupDir sets the backup directory for resolving local image paths
+func (u *ImageUploader) SetBackupDir(dir string) {
+	u.backupDir = dir
+}
+
+// SetImagePolicy sets the image handling policy (O7)
+func (u *ImageUploader) SetImagePolicy(policy ImagePolicy) {
+	u.imagePolicy = policy
 }
 
 // UploadProductImages uploads images for a product
 func (u *ImageUploader) UploadProductImages(ctx context.Context, productID string, images []Image) error {
+	// Check image policy (O7)
+	if u.imagePolicy == ImageSkip {
+		u.logger.Infof("Image policy is skip - skipping %d images for product %s", len(images), productID)
+		return nil
+	}
+
 	if u.client.DryRun {
 		u.logger.Infof("Dry run - would upload %d images to product %s", len(images), productID)
 		return nil
@@ -90,12 +109,12 @@ func (u *ImageUploader) resolveImageSource(ctx context.Context, source string) (
 		return source, nil
 	}
 
-	// Assume it's a relative path from backup directory
-	backupDir := u.client.StoreURL // This would need to be passed properly
-	fullPath := filepath.Join(backupDir, source)
-
-	if _, err := os.Stat(fullPath); err == nil {
-		return u.uploadLocalFile(ctx, fullPath)
+	// Assume it's a relative path from backup directory (O9: use backupDir instead of StoreURL)
+	if u.backupDir != "" {
+		fullPath := filepath.Join(u.backupDir, source)
+		if _, err := os.Stat(fullPath); err == nil {
+			return u.uploadLocalFile(ctx, fullPath)
+		}
 	}
 
 	// Try as Shopify CDN URL
@@ -354,7 +373,7 @@ func (u *ImageUploader) uploadToURL(ctx context.Context, url string, data []byte
 	}
 
 	// Execute request
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := u.client.HTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("execute request: %w", err)
 	}
@@ -375,7 +394,7 @@ func (u *ImageUploader) headURL(ctx context.Context, url string) (bool, error) {
 		return false, err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := u.client.HTTPClient.Do(req)
 	if err != nil {
 		return false, err
 	}

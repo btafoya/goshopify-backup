@@ -34,6 +34,7 @@ type Model struct {
 	restoreResults   []RestoreResult
 	restoreProgress  *RestoreProgress
 	restoreStateFile string
+	conflictMode     ConflictMode
 
 	// Error handling
 	errorMsg string
@@ -82,6 +83,13 @@ func InitialModel(cfg *Config) (*Model, error) {
 		m.entityStates[entityType] = EntityState{
 			selected: make(map[string]bool),
 		}
+	}
+
+	// Set conflict mode from --force flag
+	if cfg.Force {
+		m.conflictMode = ConflictOverwrite
+	} else {
+		m.conflictMode = ConflictSkip
 	}
 
 	// If backup date is specified, skip to entity select
@@ -792,23 +800,81 @@ func loadItemsCmd(backupDir, date string, entityType EntityType) tea.Cmd {
 
 // convertBackupItem converts a backup.Item to main.Item with Type
 func convertBackupItem(bi backup.Item, entityType EntityType) Item {
+	// Convert backup variants to main variants
+	variants := make([]ProductVariant, len(bi.Variants))
+	for i, v := range bi.Variants {
+		variants[i] = ProductVariant{
+			ID:               v.ID,
+			Title:            v.Title,
+			Price:            v.Price,
+			SKU:              v.SKU,
+			InventoryQuantity: v.InventoryQuantity,
+			CompareAtPrice:   v.CompareAtPrice,
+		}
+	}
+
+	// Convert backup metafields to main metafields
+	metafields := make([]Metafield, len(bi.Metafields))
+	for i, m := range bi.Metafields {
+		metafields[i] = Metafield{
+			ID:        m.ID,
+			Namespace: m.Namespace,
+			Key:       m.Key,
+			Value:     m.Value,
+			Type:      m.Type,
+		}
+	}
+
+	// Convert backup addresses to main addresses
+	addresses := make([]CustomerAddress, len(bi.Addresses))
+	for i, a := range bi.Addresses {
+		addresses[i] = CustomerAddress{
+			ID:       a.ID,
+			Address1: a.Address1,
+			Address2: a.Address2,
+			City:     a.City,
+			Province: a.Province,
+			Country:  a.Country,
+			Zip:      a.Zip,
+			Phone:    a.Phone,
+		}
+	}
+
+	// Convert backup images to main images
+	images := make([]Image, len(bi.Images))
+	for i, img := range bi.Images {
+		images[i] = Image{
+			Source:     img.Src,
+			AltText:    img.AltText,
+			Position:   img.Position,
+			Width:      img.Width,
+			Height:     img.Height,
+			OriginalID: img.ID,
+		}
+	}
+
 	return Item{
-		ID:         bi.ID,
-		Title:      bi.Title,
-		Handle:     bi.Handle,
-		CreatedAt:  bi.CreatedAt,
-		UpdatedAt:  bi.UpdatedAt,
-		Status:     bi.Status,
-		Tags:       bi.Tags,
-		CustomData: bi.CustomData,
-		Type:       entityType,
-		Price:      bi.Price,
-		VariantCount: bi.VariantCount,
-		Email:      bi.Email,
-		OrderNumber: bi.OrderNumber,
-		FinancialStatus: bi.FinancialStatus,
-		FulfillmentStatus: bi.FulfillmentStatus,
-		ProductsCount: bi.ProductsCount,
+		ID:                 bi.ID,
+		Title:              bi.Title,
+		Handle:             bi.Handle,
+		CreatedAt:          bi.CreatedAt,
+		UpdatedAt:          bi.UpdatedAt,
+		Status:             bi.Status,
+		Tags:               bi.Tags,
+		CustomData:         bi.CustomData,
+		Type:               entityType,
+		Price:              bi.Price,
+		VariantCount:       bi.VariantCount,
+		Variants:           variants,
+		Metafields:         metafields,
+		Addresses:          addresses,
+		CollectionProducts: bi.CollectionProducts,
+		Images:             images,
+		Email:              bi.Email,
+		OrderNumber:        bi.OrderNumber,
+		FinancialStatus:    bi.FinancialStatus,
+		FulfillmentStatus:  bi.FulfillmentStatus,
+		ProductsCount:      bi.ProductsCount,
 	}
 }
 
@@ -855,7 +921,7 @@ func startRestoreCmd(m Model) tea.Cmd {
 
 		// Real restore execution
 		client := NewShopifyClient(m.cfg.Store, m.cfg.AccessToken, m.cfg.APIVersion, m.cfg.DryRun)
-		executor := NewRestoreExecutor(client, ConflictSkip)
+		executor := NewRestoreExecutor(client, m.conflictMode)
 
 		ctx := context.Background()
 		results, err := executor.ExecuteRestore(ctx, selectedItems)

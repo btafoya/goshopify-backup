@@ -312,6 +312,10 @@ func (m *MetaobjectsModule) RunREST(ctx context.Context, graphqlClient *shopify.
 				return entryCount, 0, fmt.Errorf("failed to execute paginated query for type %s: %w", metaobjectType, err)
 			}
 
+			if strings.Contains(string(data), `"data":null`) {
+				return entryCount, 0, fmt.Errorf("metaobjects query for type %s returned null data", metaobjectType)
+			}
+
 			if err := json.Unmarshal(data, &result); err != nil {
 				return entryCount, 0, fmt.Errorf("failed to unmarshal paginated response for type %s: %w", metaobjectType, err)
 			}
@@ -369,6 +373,12 @@ func (m *MetaobjectsModule) backupDefinitions(ctx context.Context, graphqlClient
 	data, err := graphqlClient.Query(ctx, fmt.Sprintf(`{"query":"%s"}`, minifiedQuery))
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("failed to query metaobject definitions: %w", err)
+	}
+
+	// Check for null data in response (indicates GraphQL error that should have been
+	// caught by Query() but verify as defense-in-depth)
+	if strings.Contains(string(data), `"data":null`) {
+		return 0, 0, nil, fmt.Errorf("metaobject definitions query returned null data")
 	}
 
 	var result struct {

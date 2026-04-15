@@ -99,6 +99,16 @@ type Request struct {
 	QueryParams map[string]string
 }
 
+// HTTPError wraps an error with an HTTP status code
+type HTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Body)
+}
+
 // Response represents an API response
 type Response struct {
 	StatusCode int
@@ -106,7 +116,7 @@ type Response struct {
 	Headers    http.Header
 }
 
-// Do executes an HTTP request
+// Do executes a single HTTP request (no retry). Use DoWithRetry for automatic retries.
 func (c *ShopifyClient) Do(ctx context.Context, req Request) (*Response, error) {
 	if err := c.RateLimiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("rate limit wait: %w", err)
@@ -150,12 +160,9 @@ func (c *ShopifyClient) Do(ctx context.Context, req Request) (*Response, error) 
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	// Check for rate limit
-	if resp.StatusCode == 429 {
-		retryAfter := resp.Header.Get("Retry-After")
-		if retryAfter != "" {
-			c.logger.Warnf("Rate limited, retry after: %s", retryAfter)
-		}
+	// Return HTTPError for retryable status codes so Retry() can detect them
+	if resp.StatusCode == 429 || resp.StatusCode >= 500 {
+		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(respBody)}
 	}
 
 	return &Response{
@@ -163,6 +170,31 @@ func (c *ShopifyClient) Do(ctx context.Context, req Request) (*Response, error) 
 		Body:       respBody,
 		Headers:    resp.Header,
 	}, nil
+}
+
+// DoWithRetry executes an HTTP request with automatic retry on 429/5xx/network errors.
+func (c *ShopifyClient) DoWithRetry(ctx context.Context, req Request) (*Response, error) {
+	var resp *Response
+	err := Retry(ctx, RestoreRetryCount, RestoreRetryDelay, func() error {
+		var reqErr error
+		resp, reqErr = c.Do(ctx, req)
+		if reqErr == nil {
+			return nil
+		}
+		// Handle 429 with Retry-After header
+		if httpErr, ok := reqErr.(*HTTPError); ok && httpErr.StatusCode == 429 {
+			// The Retry-After header is in the response, but we lost it in HTTPError.
+			// Use a minimum 2-second wait for rate limits.
+			c.logger.Warnf("Rate limited (429), backing off before retry")
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(RestoreRetryDelay):
+			}
+		}
+		return reqErr
+	})
+	return resp, err
 }
 
 // GraphQLRequest represents a GraphQL request
@@ -187,7 +219,7 @@ type GraphQLError struct {
 	Path []interface{} `json:"path,omitempty"`
 }
 
-// DoGraphQL executes a GraphQL request
+// DoGraphQL executes a GraphQL request with automatic retry on 429/5xx.
 func (c *ShopifyClient) DoGraphQL(ctx context.Context, query string, variables map[string]interface{}) (*GraphQLResponse, error) {
 	reqBody := GraphQLRequest{
 		Query:     query,
@@ -200,13 +232,13 @@ func (c *ShopifyClient) DoGraphQL(ctx context.Context, query string, variables m
 		Body:   reqBody,
 	}
 
-	resp, err := c.Do(ctx, req)
+	resp, err := c.DoWithRetry(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("graphql request failed: %d - %s", resp.StatusCode, string(resp.Body))
+		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(resp.Body)}
 	}
 
 	var graphqlResp GraphQLResponse
@@ -233,9 +265,8 @@ func IsErrorRetryable(err error) bool {
 	}
 
 	// HTTP 429, 5xx errors are retryable
-	var httpErr interface{ StatusCode() int }
-	if ok := false; ok {
-		code := httpErr.StatusCode()
+	if httpErr, ok := err.(*HTTPError); ok {
+		code := httpErr.StatusCode
 		return code == 429 || code >= 500
 	}
 
