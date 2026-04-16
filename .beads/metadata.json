@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "goshopify_backup",
+  "project_id": "7d2adab3-612d-49a7-805f-6739eefd8ba9"
+}
