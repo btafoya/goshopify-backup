@@ -20,9 +20,7 @@ Go CLI tools for Shopify store data backup and restore. The backup tool dumps st
 
 - Use context7 for reference
 - Commit as author: **btafoya** — no AI attribution in messages
-- Follow `.claude/skills/anti-slop/SKILL.md` for quality standards
-- Follow `.claude/skills/golang-pro/SKILL.md`
-- Follow `.claude/skills/shopify-admin-graphql/SKILL.md`
+- Follow `.claude/skills/*`
 
 
 ## Build Process
