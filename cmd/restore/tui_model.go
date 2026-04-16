@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/btafoya/goshopify-restore/backup"
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Model is the main Bubbletea model with state machine
@@ -34,6 +35,7 @@ type Model struct {
 	restoreResults   []RestoreResult
 	restoreProgress  *RestoreProgress
 	restoreStateFile string
+	restoreExecutor  *RestoreExecutor
 	conflictMode     ConflictMode
 
 	// Error handling
@@ -47,9 +49,9 @@ type Model struct {
 	height int
 
 	// Sub-models for Bubbles components
-	filterBar     FilterBarModel
-	statusBar     StatusBarModel
-	filterDialog  FilterDialogModel
+	filterBar    FilterBarModel
+	statusBar    StatusBarModel
+	filterDialog FilterDialogModel
 
 	// Quit flag
 	quit bool
@@ -68,14 +70,14 @@ type EntityState struct {
 // InitialModel creates the initial TUI model
 func InitialModel(cfg *Config) (*Model, error) {
 	m := &Model{
-		cfg:          cfg,
-		state:        StateConfig,
-		backupDir:    cfg.BackupDir,
-		entityStates: make(map[EntityType]EntityState),
+		cfg:           cfg,
+		state:         StateConfig,
+		backupDir:     cfg.BackupDir,
+		entityStates:  make(map[EntityType]EntityState),
 		selectedItems: make(map[EntityType]map[string]Item),
-		filterBar:    NewFilterBar(),
-		statusBar:    NewStatusBar("", ""),
-		filterDialog: NewFilterDialog(),
+		filterBar:     NewFilterBar(),
+		statusBar:     NewStatusBar("", ""),
+		filterDialog:  NewFilterDialog(),
 	}
 
 	// Initialize entity states
@@ -155,24 +157,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.restoreProgress = &RestoreProgress{}
 		}
 		m.restoreProgress = msg.progress
+		if m.restoreExecutor != nil {
+			return m, pollProgressCmd(m.restoreExecutor)
+		}
 		return m, nil
 	case restoreCompleteMsg:
 		m.restoreResults = msg.results
 		m.state = StateComplete
 		return m, nil
-		case previewGeneratedMsg:
-			m.previewChanges = msg.changes
-			m.state = StatePreview
-			return m, nil
-		case itemsLoadedMsg:
-			state := m.entityStates[msg.entityType]
-			state.items = msg.items
-			state.filtered = make([]Item, len(msg.items))
-			copy(state.filtered, msg.items)
-			state.cursor = 0
-			state.scroll = 0
-			m.entityStates[msg.entityType] = state
-			return m, nil
+	case restoreStartedMsg:
+		m.restoreExecutor = msg.executor
+		return m, pollProgressCmd(msg.executor)
+	case previewGeneratedMsg:
+		m.previewChanges = msg.changes
+		m.state = StatePreview
+		return m, nil
+	case itemsLoadedMsg:
+		state := m.entityStates[msg.entityType]
+		state.items = msg.items
+		state.filtered = make([]Item, len(msg.items))
+		copy(state.filtered, msg.items)
+		state.cursor = 0
+		state.scroll = 0
+		m.entityStates[msg.entityType] = state
+		return m, nil
 
 	case filterTextChangedMsg:
 		m.applyFilter(msg.text)
@@ -251,7 +259,8 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.quit = true
 		return m, tea.Quit
 	case "enter":
-		m.state = StateItemSelect
+		m.state = StateBackupSelect
+		return m, loadBackupsCmd(m.backupDir)
 	}
 	return m, nil
 }
@@ -271,7 +280,10 @@ func (m Model) handleBackupSelectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.backupIndex++
 		}
 	case "enter":
-		m.state = StateItemSelect
+		if len(m.backupList) > 0 {
+			m.selectedDate = m.backupList[m.backupIndex].Date.Format(DateFormat)
+			m.state = StateEntitySelect
+		}
 	}
 	return m, nil
 }
@@ -337,9 +349,9 @@ func (m Model) handleItemSelectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		for _, item := range state.filtered {
 			state.selected[item.ID] = true
 		}
-		case "enter":
-			m.state = StatePreview
-			return m, generatePreviewCmd
+	case "enter":
+		m.state = StatePreview
+		return m, generatePreviewCmd
 
 	case "/":
 		m.filterBar.Activate()
@@ -371,7 +383,6 @@ func (m Model) handlePreviewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 	return m, nil
 }
-
 
 // handleConfirmKey handles keys in confirm state
 func (m Model) handleConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -710,6 +721,10 @@ type restoreCompleteMsg struct {
 	results []RestoreResult
 }
 
+type restoreStartedMsg struct {
+	executor *RestoreExecutor
+}
+
 type filterTextChangedMsg struct {
 	text string
 }
@@ -804,12 +819,12 @@ func convertBackupItem(bi backup.Item, entityType EntityType) Item {
 	variants := make([]ProductVariant, len(bi.Variants))
 	for i, v := range bi.Variants {
 		variants[i] = ProductVariant{
-			ID:               v.ID,
-			Title:            v.Title,
-			Price:            v.Price,
-			SKU:              v.SKU,
+			ID:                v.ID,
+			Title:             v.Title,
+			Price:             v.Price,
+			SKU:               v.SKU,
 			InventoryQuantity: v.InventoryQuantity,
-			CompareAtPrice:   v.CompareAtPrice,
+			CompareAtPrice:    v.CompareAtPrice,
 		}
 	}
 
@@ -853,7 +868,7 @@ func convertBackupItem(bi backup.Item, entityType EntityType) Item {
 		}
 	}
 
-	return Item{
+	item := Item{
 		ID:                 bi.ID,
 		Title:              bi.Title,
 		Handle:             bi.Handle,
@@ -876,6 +891,43 @@ func convertBackupItem(bi backup.Item, entityType EntityType) Item {
 		FulfillmentStatus:  bi.FulfillmentStatus,
 		ProductsCount:      bi.ProductsCount,
 	}
+
+	// Map metaobject CustomData fields to typed fields for mutation executor
+	if entityType == EntityMetaobjects {
+		if isDef, _ := bi.CustomData["isDefinition"].(bool); isDef {
+			// Definition item — preserve CustomData for restoreMetaobjectDefinitionFromItem
+			item.CustomData = bi.CustomData
+			if defType, ok := bi.CustomData["definitionType"].(string); ok {
+				item.MetaobjectDefinition = &defType
+			}
+		} else {
+			// Entry item
+			if def, ok := bi.CustomData["metaobjectDefinition"].(string); ok {
+				item.MetaobjectDefinition = &def
+			}
+			if key, ok := bi.CustomData["metaobjectKey"].(string); ok {
+				item.Key = key
+			}
+			if fields, ok := bi.CustomData["metaobjectFields"].(map[string]interface{}); ok {
+				item.MetaobjectFields = fields
+			}
+		}
+	}
+
+	// Map page CustomData fields to typed fields for mutation executor
+	if entityType == EntityPages {
+		if bodyHTML, ok := bi.CustomData["body_html"].(string); ok {
+			item.BodyHTML = bodyHTML
+		}
+		if templateSuffix, ok := bi.CustomData["template_suffix"].(string); ok {
+			item.TemplateSuffix = templateSuffix
+		}
+		if author, ok := bi.CustomData["author"].(string); ok {
+			item.Author = author
+		}
+	}
+
+	return item
 }
 
 var generatePreviewCmd tea.Cmd = func() tea.Msg {
@@ -920,15 +972,39 @@ func startRestoreCmd(m Model) tea.Cmd {
 		}
 
 		// Real restore execution
-		client := NewShopifyClient(m.cfg.Store, m.cfg.AccessToken, m.cfg.APIVersion, m.cfg.DryRun)
+		var client *ShopifyClient
+		if m.cfg.ClientID != "" && m.cfg.ClientSecret != "" {
+			client = NewShopifyClientWithCredentials(m.cfg.Store, m.cfg.ClientID, m.cfg.ClientSecret, m.cfg.APIVersion, m.cfg.DryRun)
+		} else {
+			client = NewShopifyClient(m.cfg.Store, m.cfg.AccessToken, m.cfg.APIVersion, m.cfg.DryRun)
+		}
+		authCtx := context.Background()
+		if err := client.Authenticate(authCtx); err != nil {
+			return errorMsg(fmt.Sprintf("Authentication failed: %v", err))
+		}
 		executor := NewRestoreExecutor(client, m.conflictMode)
 
-		ctx := context.Background()
-		results, err := executor.ExecuteRestore(ctx, selectedItems)
-		if err != nil {
-			return errorMsg(fmt.Sprintf("Restore failed: %v", err))
-		}
+		// Start restore in background goroutine
+		go executor.ExecuteRestore(context.Background(), selectedItems)
 
-		return restoreCompleteMsg{results: results}
+		return restoreStartedMsg{executor: executor}
 	}
+}
+
+// pollProgressCmd periodically polls executor progress via tea.Tick.
+// Uses GetProgress() (mutex-protected) instead of channel reads to avoid deadlock.
+// Checks Done() channel on each tick to detect completion.
+func pollProgressCmd(executor *RestoreExecutor) tea.Cmd {
+	return tea.Tick(RefreshInterval, func(t time.Time) tea.Msg {
+		select {
+		case <-executor.Done():
+			results, err := executor.GetResults()
+			if err != nil {
+				return errorMsg(fmt.Sprintf("Restore failed: %v", err))
+			}
+			return restoreCompleteMsg{results: results}
+		default:
+			return restoreProgressMsg{progress: executor.GetProgress()}
+		}
+	})
 }

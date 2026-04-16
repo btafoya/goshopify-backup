@@ -20,34 +20,34 @@ var (
 
 	// Styles
 	styleTitle = lipgloss.NewStyle().
-		Foreground(colorTitle).
-		Bold(true)
+			Foreground(colorTitle).
+			Bold(true)
 
 	styleSubtitle = lipgloss.NewStyle().
-		Foreground(colorSubtitle)
+			Foreground(colorSubtitle)
 
 	styleSuccess = lipgloss.NewStyle().
-		Foreground(colorSuccess)
+			Foreground(colorSuccess)
 
 	styleError = lipgloss.NewStyle().
-		Foreground(colorError)
+			Foreground(colorError)
 
 	styleWarning = lipgloss.NewStyle().
-		Foreground(colorWarning)
+			Foreground(colorWarning)
 
 	styleInfo = lipgloss.NewStyle().
-		Foreground(colorInfo)
+			Foreground(colorInfo)
 
 	styleDim = lipgloss.NewStyle().
-		Foreground(colorDim)
+			Foreground(colorDim)
 
 	styleMuted = lipgloss.NewStyle().
-		Foreground(colorMuted)
+			Foreground(colorMuted)
 
 	// Border styles
 	styleBorder = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorMuted)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorMuted)
 
 	styleBorderStyle = lipgloss.Border{
 		Top:         "─",
@@ -61,63 +61,63 @@ var (
 	}
 
 	styleDoubleBorder = lipgloss.NewStyle().
-		Border(lipgloss.DoubleBorder()).
-		BorderForeground(colorMuted)
+				Border(lipgloss.DoubleBorder()).
+				BorderForeground(colorMuted)
 
 	// Header style
 	styleHeader = lipgloss.NewStyle().
-		Background(colorTitle).
-		Foreground(lipgloss.Color("15")).
-		Bold(true).
-		Padding(0, 1)
+			Background(colorTitle).
+			Foreground(lipgloss.Color("15")).
+			Bold(true).
+			Padding(0, 1)
 
 	// Footer style
 	styleFooter = lipgloss.NewStyle().
-		Foreground(colorDim).
-		Padding(0, 1)
+			Foreground(colorDim).
+			Padding(0, 1)
 
 	// Cursor style
 	styleCursor = lipgloss.NewStyle().
-		Foreground(colorInfo).
-		Bold(true)
+			Foreground(colorInfo).
+			Bold(true)
 
 	// Selected style
 	styleSelected = lipgloss.NewStyle().
-		Foreground(colorSuccess)
+			Foreground(colorSuccess)
 
 	// Focused style
 	styleFocused = lipgloss.NewStyle().
-		Foreground(colorSuccess).
-		Bold(true)
+			Foreground(colorSuccess).
+			Bold(true)
 
 	// Card style
 	styleCard = lipgloss.NewStyle().
-		Border(styleBorderStyle).
-		BorderForeground(colorDim).
-		Padding(1)
+			Border(styleBorderStyle).
+			BorderForeground(colorDim).
+			Padding(1)
 
 	// Progress bar styles
 	styleProgressBar = lipgloss.NewStyle().
-		Width(40)
+				Width(40)
 
 	styleProgressFill = lipgloss.NewStyle().
-		Background(colorSuccess)
+				Background(colorSuccess)
 
 	styleProgressEmpty = lipgloss.NewStyle().
-		Background(colorDim)
+				Background(colorDim)
 
 	// Status styles
 	styleStatusRunning = lipgloss.NewStyle().
-		Foreground(colorWarning)
+				Foreground(colorWarning)
 
 	styleStatusCompleted = lipgloss.NewStyle().
-		Foreground(colorSuccess)
+				Foreground(colorSuccess)
 
 	styleStatusFailed = lipgloss.NewStyle().
-		Foreground(colorError)
+				Foreground(colorError)
 
 	styleStatusPending = lipgloss.NewStyle().
-		Foreground(colorDim)
+				Foreground(colorDim)
 )
 
 // RenderTitle renders a title with the global title style

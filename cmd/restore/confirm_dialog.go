@@ -9,11 +9,11 @@ import (
 
 // ConfirmDialogModel represents a confirmation dialog
 type ConfirmDialogModel struct {
-	visible    bool
-	title      string
-	message    string
-	items      []ConfirmItem
-	selection  int // 0 = yes, 1 = no
+	visible   bool
+	title     string
+	message   string
+	items     []ConfirmItem
+	selection int // 0 = yes, 1 = no
 }
 
 // ConfirmItem represents an item in the confirmation list

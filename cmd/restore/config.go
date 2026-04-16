@@ -15,6 +15,8 @@ func GetConfig() (*Config, error) {
 		BackupDir:     getEnvDefault("BACKUP_DIR", "/backups/shopify"),
 		Store:         os.Getenv("SHOPIFY_STORE"),
 		AccessToken:   os.Getenv("SHOPIFY_ACCESS_TOKEN"),
+		ClientID:      os.Getenv("SHOPIFY_CLIENT_ID"),
+		ClientSecret:  os.Getenv("SHOPIFY_SECRET"),
 		APIVersion:    getEnvDefault("SHOPIFY_API_VERSION", APIVersion),
 		LogDir:        getEnvDefault("LOG_DIR", "/var/log/goshopify"),
 		RollbackDir:   getEnvDefault("ROLLBACK_DIR", "/var/log/goshopify"),
@@ -47,6 +49,14 @@ func GetConfig() (*Config, error) {
 		case "--token":
 			if i+1 < len(os.Args)-1 {
 				cfg.AccessToken = os.Args[i+2]
+			}
+		case "--client-id":
+			if i+1 < len(os.Args)-1 {
+				cfg.ClientID = os.Args[i+2]
+			}
+		case "--client-secret":
+			if i+1 < len(os.Args)-1 {
+				cfg.ClientSecret = os.Args[i+2]
 			}
 		case "--images-restore":
 			cfg.RestoreImages = ImageRestore
@@ -94,9 +104,19 @@ func ValidateConfig(cfg *Config) error {
 		}
 	}
 
-	// Validate SHOPIFY_ACCESS_TOKEN if store is provided
-	if cfg.Store != "" && cfg.AccessToken == "" {
-		return fmt.Errorf("SHOPIFY_ACCESS_TOKEN is required when store is specified")
+	// Validate authentication: either access token or client credentials required when store is provided
+	if cfg.Store != "" {
+		hasAccessToken := cfg.AccessToken != ""
+		hasClientCredentials := cfg.ClientID != "" && cfg.ClientSecret != ""
+		if !hasAccessToken && !hasClientCredentials {
+			return fmt.Errorf("SHOPIFY_ACCESS_TOKEN or both SHOPIFY_CLIENT_ID and SHOPIFY_SECRET are required when store is specified")
+		}
+		if cfg.ClientID != "" && cfg.ClientSecret == "" {
+			return fmt.Errorf("SHOPIFY_SECRET is required when SHOPIFY_CLIENT_ID is provided")
+		}
+		if cfg.ClientSecret != "" && cfg.ClientID == "" {
+			return fmt.Errorf("SHOPIFY_CLIENT_ID is required when SHOPIFY_SECRET is provided")
+		}
 	}
 
 	// Validate SHOPIFY_API_VERSION

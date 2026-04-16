@@ -29,6 +29,8 @@ func (v *RestoreValidator) ValidateItem(item Item) {
 		v.validateCollection(item)
 	case EntityMetaobjects:
 		v.validateMetaobject(item)
+	case EntityPages:
+		v.validatePage(item)
 	}
 }
 
@@ -93,6 +95,16 @@ func (v *RestoreValidator) validateMetaobject(item Item) {
 	fields, _ := item.CustomData["metaobjectFields"].(map[string]interface{})
 	if len(fields) == 0 {
 		v.warnings = append(v.warnings, fmt.Sprintf("Metaobject %s: no fields defined", item.ID))
+	}
+}
+
+// validatePage checks page data for issues
+func (v *RestoreValidator) validatePage(item Item) {
+	if item.Title == "" {
+		v.errors = append(v.errors, fmt.Sprintf("Page %s: missing title", item.ID))
+	}
+	if item.Handle == "" {
+		v.warnings = append(v.warnings, fmt.Sprintf("Page %s: missing handle, will be auto-generated", item.ID))
 	}
 }
 

@@ -11,22 +11,22 @@ import (
 
 // FileLogger writes structured JSON log entries to a file (O3)
 type FileLogger struct {
-	mu       sync.Mutex
-	file     *os.File
-	logDir   string
-	started  time.Time
+	mu      sync.Mutex
+	file    *os.File
+	logDir  string
+	started time.Time
 }
 
 // FileLogEntry represents a structured log entry for the file logger
 type FileLogEntry struct {
-	Timestamp string      `json:"timestamp"`
-	Level     string      `json:"level"`
-	Message   string      `json:"message"`
-	Entity    string      `json:"entity,omitempty"`
-	ItemID    string      `json:"itemId,omitempty"`
-	Action    string      `json:"action,omitempty"`
-	Duration  string      `json:"duration,omitempty"`
-	Error     string      `json:"error,omitempty"`
+	Timestamp string `json:"timestamp"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+	Entity    string `json:"entity,omitempty"`
+	ItemID    string `json:"itemId,omitempty"`
+	Action    string `json:"action,omitempty"`
+	Duration  string `json:"duration,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // NewFileLogger creates a new file logger

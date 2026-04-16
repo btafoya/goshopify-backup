@@ -8,19 +8,19 @@ import (
 type ConflictMode string
 
 const (
-	ConflictSkip      ConflictMode = "skip"       // Skip conflicting items
-	ConflictOverwrite ConflictMode = "overwrite"  // Overwrite existing items
-	ConflictRename    ConflictMode = "rename"     // Rename to avoid conflicts
+	ConflictSkip      ConflictMode = "skip"      // Skip conflicting items
+	ConflictOverwrite ConflictMode = "overwrite" // Overwrite existing items
+	ConflictRename    ConflictMode = "rename"    // Rename to avoid conflicts
 )
 
 // ConflictResolution represents a resolved conflict
 type ConflictResolution struct {
-	ItemID        string
-	ConflictType  string
-	Resolution    ConflictMode
-	OriginalID    string
-	NewID         string
-	Message       string
+	ItemID       string
+	ConflictType string
+	Resolution   ConflictMode
+	OriginalID   string
+	NewID        string
+	Message      string
 }
 
 // ConflictResolver handles conflict detection and resolution

@@ -16,28 +16,28 @@ import (
 
 // ImageUploader handles image upload to Shopify
 type ImageUploader struct {
-	client     *ShopifyClient
-	logger     *log.Logger
-	backupDir  string    // Backup directory for resolving local image paths (O9)
+	client      *ShopifyClient
+	logger      *log.Logger
+	backupDir   string      // Backup directory for resolving local image paths (O9)
 	imagePolicy ImagePolicy // Image handling policy (O7)
 }
 
 // Image represents an image to upload
 type Image struct {
-	Source     string `json:"src"`      // URL or local path
+	Source     string `json:"src"` // URL or local path
 	AltText    string `json:"altText"`
 	Position   int    `json:"position"`
 	Width      int    `json:"width"`
 	Height     int    `json:"height"`
-	OriginalID string `json:"-"`       // Original ID from backup
+	OriginalID string `json:"-"` // Original ID from backup
 }
 
 // NewImageUploader creates a new image uploader
 func NewImageUploader(client *ShopifyClient) *ImageUploader {
 	return &ImageUploader{
 		client:      client,
-		logger:       log.New(os.Stderr),
-		imagePolicy:  ImageInteractive, // Default
+		logger:      log.New(os.Stderr),
+		imagePolicy: ImageInteractive, // Default
 	}
 }
 
@@ -49,6 +49,56 @@ func (u *ImageUploader) SetBackupDir(dir string) {
 // SetImagePolicy sets the image handling policy (O7)
 func (u *ImageUploader) SetImagePolicy(policy ImagePolicy) {
 	u.imagePolicy = policy
+}
+
+// UploadBackupImages uploads images from a backup directory for a specific product
+// This enables standalone image restore without requiring a full product restore
+func (u *ImageUploader) UploadBackupImages(ctx context.Context, productGID string, backupDir string, productID string) error {
+	imageDir := filepath.Join(backupDir, "images", productID)
+	if _, err := os.Stat(imageDir); os.IsNotExist(err) {
+		return fmt.Errorf("no images found for product %s in backup", productID)
+	}
+
+	entries, err := os.ReadDir(imageDir)
+	if err != nil {
+		return fmt.Errorf("read image directory: %w", err)
+	}
+
+	if len(entries) == 0 {
+		return fmt.Errorf("image directory is empty for product %s", productID)
+	}
+
+	if u.client.DryRun {
+		u.logger.Infof("Dry run - would upload %d images to product %s", len(entries), productGID)
+		return nil
+	}
+
+	for i, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		filePath := filepath.Join(imageDir, entry.Name())
+		imageURL, err := u.uploadLocalFile(ctx, filePath)
+		if err != nil {
+			u.logger.Warnf("Failed to upload local image %s: %v", filePath, err)
+			continue
+		}
+
+		img := Image{
+			Source:   imageURL,
+			Position: i + 1,
+		}
+
+		if err := u.createProductImage(ctx, productGID, imageURL, img); err != nil {
+			u.logger.Warnf("Failed to create product image from %s: %v", filePath, err)
+			continue
+		}
+
+		u.logger.Infof("Uploaded image %d/%d for product %s", i+1, len(entries), productGID)
+	}
+
+	return nil
 }
 
 // UploadProductImages uploads images for a product
@@ -313,10 +363,10 @@ func (u *ImageUploader) createProductImage(ctx context.Context, productID, image
 	`
 
 	input := map[string]interface{}{
-		"productId":  productID,
-		"src":        imageURL,
-		"altText":    img.AltText,
-		"position":   img.Position,
+		"productId": productID,
+		"src":       imageURL,
+		"altText":   img.AltText,
+		"position":  img.Position,
 	}
 
 	variables := map[string]interface{}{

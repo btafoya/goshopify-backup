@@ -1,16 +1,16 @@
 package main
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 // FilterBarModel represents a filter input component
 type FilterBarModel struct {
 	textInput textinput.Model
-	active     bool
-	visible    bool
+	active    bool
+	visible   bool
 }
 
 // NewFilterBar creates a new filter bar

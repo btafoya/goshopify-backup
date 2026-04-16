@@ -63,8 +63,11 @@ func TestRestoreExecutor_GetProgress(t *testing.T) {
 	executor := NewRestoreExecutor(client, ConflictSkip)
 
 	progress := executor.GetProgress()
-	if progress != nil {
-		t.Error("GetProgress() should be nil before execution")
+	if progress == nil {
+		t.Error("GetProgress() should return non-nil (empty progress before execution)")
+	}
+	if progress.TotalItems != 0 {
+		t.Error("GetProgress() should have zero TotalItems before execution")
 	}
 }
 
@@ -94,9 +97,9 @@ func TestRestoreExecutor_SaveResumeState(t *testing.T) {
 	}
 
 	item := Item{
-		ID:     "gid://shopify/Product/1",
-		Title:  "Test Product",
-		Type:   EntityProducts,
+		ID:    "gid://shopify/Product/1",
+		Title: "Test Product",
+		Type:  EntityProducts,
 	}
 	result := &RestoreResult{
 		Success:    true,

@@ -178,7 +178,7 @@ func TestEntityDisplayNames(t *testing.T) {
 func TestStateString(t *testing.T) {
 	tests := []struct {
 		state State
-		want string
+		want  string
 	}{
 		{StateConfig, "Config"},
 		{StateBackupSelect, "Backup Select"},

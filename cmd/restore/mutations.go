@@ -61,7 +61,13 @@ func (e *MutationExecutor) RestoreItem(ctx context.Context, item Item, conflictM
 	case EntityCollections:
 		restoredID, err = e.restoreCollection(ctx, item, conflictMode)
 	case EntityMetaobjects:
-		restoredID, err = e.restoreMetaobject(ctx, item, conflictMode)
+		if isMetaobjectDefinition(item) {
+			restoredID, err = e.restoreMetaobjectDefinitionFromItem(ctx, item, conflictMode)
+		} else {
+			restoredID, err = e.restoreMetaobject(ctx, item, conflictMode)
+		}
+	case EntityPages:
+		restoredID, err = e.restorePage(ctx, item, conflictMode)
 	default:
 		err = fmt.Errorf("unsupported entity type: %s", item.Type)
 	}
@@ -129,13 +135,13 @@ func (e *MutationExecutor) restoreProduct(ctx context.Context, item Item, confli
 	`
 
 	input := map[string]interface{}{
-		"title":          item.Title,
-		"handle":         item.Handle,
+		"title":           item.Title,
+		"handle":          item.Handle,
 		"descriptionHtml": item.Description,
-		"productType":    item.ProductType,
-		"vendor":         item.Vendor,
-		"tags":           item.Tags,
-		"status":         "ACTIVE",
+		"productType":     item.ProductType,
+		"vendor":          item.Vendor,
+		"tags":            item.Tags,
+		"status":          "ACTIVE",
 	}
 
 	if item.SEO != nil {
@@ -242,7 +248,7 @@ func (e *MutationExecutor) restoreCustomer(ctx context.Context, item Item, confl
 		"email":            *item.Email,
 		"firstName":        item.FirstName,
 		"lastName":         item.LastName,
-		"phone":           item.Phone,
+		"phone":            item.Phone,
 		"acceptsMarketing": false,
 	}
 
@@ -328,14 +334,14 @@ func (e *MutationExecutor) restoreOrder(ctx context.Context, item Item, conflict
 		Path:   "/orders.json",
 		Body: map[string]interface{}{
 			"order": map[string]interface{}{
-				"line_items":        item.LineItems,
-				"customer":         item.Customer,
-				"billing_address":  item.BillingAddress,
-				"shipping_address": item.ShippingAddress,
-				"financial_status":  item.FinancialStatus,
+				"line_items":         item.LineItems,
+				"customer":           item.Customer,
+				"billing_address":    item.BillingAddress,
+				"shipping_address":   item.ShippingAddress,
+				"financial_status":   item.FinancialStatus,
 				"fulfillment_status": item.FulfillmentStatus,
-				"tags":             item.Tags,
-				"note":             item.Note,
+				"tags":               item.Tags,
+				"note":               item.Note,
 			},
 		},
 	}
@@ -405,10 +411,10 @@ func (e *MutationExecutor) restoreCollection(ctx context.Context, item Item, con
 	`
 
 	input := map[string]interface{}{
-		"title":          item.Title,
-		"handle":         item.Handle,
+		"title":           item.Title,
+		"handle":          item.Handle,
 		"descriptionHtml": item.Description,
-		"rules":          item.CollectionRules,
+		"rules":           item.CollectionRules,
 	}
 
 	variables := map[string]interface{}{
@@ -500,9 +506,9 @@ func (e *MutationExecutor) restoreMetaobject(ctx context.Context, item Item, con
 	`
 
 	input := map[string]interface{}{
-		"type": *item.MetaobjectDefinition,
-		"key":  item.Key,
-		"fields": item.MetaobjectFields,
+		"type":   *item.MetaobjectDefinition,
+		"handle": item.Key,
+		"fields": metaobjectFieldsToArray(item.MetaobjectFields),
 		"capabilities": map[string]interface{}{
 			"publishable": map[string]interface{}{
 				"status": "ACTIVE",
@@ -577,7 +583,7 @@ func (e *MutationExecutor) restoreProductVariants(ctx context.Context, productID
 			input["inventoryQuantities"] = []map[string]interface{}{
 				{
 					"availableQuantity": variant.InventoryQuantity,
-					"locationId":       nil, // Will use default location
+					"locationId":        nil, // Will use default location
 				},
 			}
 		}
@@ -720,7 +726,7 @@ func (e *MutationExecutor) restoreCustomerAddresses(ctx context.Context, custome
 		}
 
 		variables := map[string]interface{}{
-			"address":   input,
+			"address":    input,
 			"customerId": customerID,
 		}
 
@@ -813,8 +819,8 @@ func (e *MutationExecutor) addProductsToCollection(ctx context.Context, collecti
 // RestoreMetaobjectDefinition creates a metaobject definition (D5)
 func (e *MutationExecutor) RestoreMetaobjectDefinition(ctx context.Context, def MetaobjectDefinition) (string, error) {
 	query := `
-		mutation metaobjectDefinitionCreate($input: MetaobjectDefinitionCreateInput!) {
-			metaobjectDefinitionCreate(input: $input) {
+		mutation metaobjectDefinitionCreate($definition: MetaobjectDefinitionCreateInput!) {
+			metaobjectDefinitionCreate(definition: $definition) {
 				metaobjectDefinition {
 					id
 					type
@@ -832,20 +838,18 @@ func (e *MutationExecutor) RestoreMetaobjectDefinition(ctx context.Context, def 
 		fieldDefs[i] = map[string]interface{}{
 			"key":  fd.Key,
 			"name": fd.Name,
-			"type": map[string]interface{}{
-				"name": fd.Type.Name,
-			},
+			"type": fd.Type.Name,
 		}
 	}
 
-	input := map[string]interface{}{
+	definition := map[string]interface{}{
 		"type":             def.Type,
-		"name":            def.Name,
+		"name":             def.Name,
 		"fieldDefinitions": fieldDefs,
 	}
 
 	variables := map[string]interface{}{
-		"input": input,
+		"definition": definition,
 	}
 
 	resp, err := e.client.DoGraphQL(ctx, query, variables)
@@ -875,6 +879,161 @@ func (e *MutationExecutor) RestoreMetaobjectDefinition(ctx context.Context, def 
 	}
 
 	return data.MetaobjectDefinitionCreate.MetaobjectDefinition.ID, nil
+}
+
+// restorePage restores a page via Shopify REST API
+func (e *MutationExecutor) restorePage(ctx context.Context, item Item, conflictMode ConflictMode) (string, error) {
+	// Extract page fields from CustomData
+	bodyHTML, _ := item.CustomData["body_html"].(string)
+	templateSuffix, _ := item.CustomData["template_suffix"].(string)
+	author, _ := item.CustomData["author"].(string)
+	publishedAt, _ := item.CustomData["published_at"].(string)
+
+	existingID, err := e.findPageByHandle(ctx, item.Handle)
+	if err != nil {
+		return "", fmt.Errorf("check existing page: %w", err)
+	}
+
+	if existingID != "" {
+		switch conflictMode {
+		case ConflictSkip:
+			return existingID, nil
+		case ConflictOverwrite:
+			return e.updatePage(ctx, existingID, item, bodyHTML, templateSuffix, author, publishedAt)
+		case ConflictRename:
+			item.Handle = generateNewHandle(item.Handle)
+		}
+	}
+
+	pageInput := map[string]interface{}{
+		"title":  item.Title,
+		"handle": item.Handle,
+	}
+
+	if bodyHTML != "" {
+		pageInput["body_html"] = bodyHTML
+	}
+	if templateSuffix != "" {
+		pageInput["template_suffix"] = templateSuffix
+	}
+	if author != "" {
+		pageInput["author"] = author
+	}
+	if publishedAt != "" {
+		pageInput["published_at"] = publishedAt
+	} else {
+		// Default to published
+		pageInput["published"] = true
+	}
+
+	req := Request{
+		Method: "POST",
+		Path:   "/pages.json",
+		Body: map[string]interface{}{
+			"page": pageInput,
+		},
+	}
+
+	resp, err := e.client.DoWithRetry(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("create page: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("page creation failed: %d - %s", resp.StatusCode, string(resp.Body))
+	}
+
+	var data struct {
+		Page struct {
+			ID int64 `json:"id"`
+		} `json:"page"`
+	}
+
+	if err := json.Unmarshal(resp.Body, &data); err != nil {
+		return "", fmt.Errorf("unmarshal page response: %w", err)
+	}
+
+	pageGID := fmt.Sprintf("gid://shopify/OnlineStorePage/%d", data.Page.ID)
+
+	// Restore metafields if present
+	if len(item.Metafields) > 0 {
+		if err := e.restoreMetafields(ctx, "PAGE", pageGID, item.Metafields); err != nil {
+			e.logger.Warnf("Failed to restore metafields for page %s: %v", pageGID, err)
+		}
+	}
+
+	return pageGID, nil
+}
+
+// updatePage updates an existing page via REST API
+func (e *MutationExecutor) updatePage(ctx context.Context, pageID string, item Item, bodyHTML, templateSuffix, author, publishedAt string) (string, error) {
+	pageInput := map[string]interface{}{
+		"title":  item.Title,
+		"handle": item.Handle,
+	}
+
+	if bodyHTML != "" {
+		pageInput["body_html"] = bodyHTML
+	}
+	if templateSuffix != "" {
+		pageInput["template_suffix"] = templateSuffix
+	}
+
+	req := Request{
+		Method: "PUT",
+		Path:   fmt.Sprintf("/pages/%s.json", pageID),
+		Body: map[string]interface{}{
+			"page": pageInput,
+		},
+	}
+
+	resp, err := e.client.DoWithRetry(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("update page: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("page update failed: %d - %s", resp.StatusCode, string(resp.Body))
+	}
+
+	return pageID, nil
+}
+
+// findPageByHandle checks if a page with the given handle exists
+func (e *MutationExecutor) findPageByHandle(ctx context.Context, handle string) (string, error) {
+	req := Request{
+		Method: "GET",
+		Path:   fmt.Sprintf("/pages.json?handle=%s", handle),
+	}
+
+	resp, err := e.client.DoWithRetry(ctx, req)
+	if err != nil {
+		return "", err
+	}
+
+	var data struct {
+		Pages []struct {
+			ID     int64  `json:"id"`
+			Handle string `json:"handle"`
+		} `json:"pages"`
+	}
+
+	if err := json.Unmarshal(resp.Body, &data); err != nil {
+		return "", err
+	}
+
+	for _, page := range data.Pages {
+		if page.Handle == handle {
+			return fmt.Sprintf("gid://shopify/OnlineStorePage/%d", page.ID), nil
+		}
+	}
+
+	return "", nil
+}
+
+// RestoreProductImages restores images from backup for a specific product
+func (e *MutationExecutor) RestoreProductImages(ctx context.Context, productGID string, backupDir string, productID string) error {
+	return e.imageUploader.UploadBackupImages(ctx, productGID, backupDir, productID)
 }
 
 // --- Helper methods for finding existing entities ---
@@ -1014,16 +1173,16 @@ func (e *MutationExecutor) findCollectionByHandle(ctx context.Context, handle st
 
 func (e *MutationExecutor) findMetaobjectByKey(ctx context.Context, definition, key string) (string, error) {
 	query := `
-		query findMetaobject($type: String!, $key: String!) {
-			metaobject(type: $type, key: $key) {
+		query findMetaobject($type: String!, $handle: String!) {
+			metaobjectByHandle(handle: {type: $type, handle: $handle}) {
 				id
 			}
 		}
 	`
 
 	variables := map[string]interface{}{
-		"type": definition,
-		"key":  key,
+		"type":   definition,
+		"handle": key,
 	}
 
 	resp, err := e.client.DoGraphQL(ctx, query, variables)
@@ -1032,17 +1191,17 @@ func (e *MutationExecutor) findMetaobjectByKey(ctx context.Context, definition, 
 	}
 
 	var data struct {
-		Metaobject *struct {
+		MetaobjectByHandle *struct {
 			ID string `json:"id"`
-		} `json:"metaobject"`
+		} `json:"metaobjectByHandle"`
 	}
 
 	if err := json.Unmarshal(resp.Data, &data); err != nil {
 		return "", err
 	}
 
-	if data.Metaobject != nil {
-		return data.Metaobject.ID, nil
+	if data.MetaobjectByHandle != nil {
+		return data.MetaobjectByHandle.ID, nil
 	}
 
 	return "", nil
@@ -1257,4 +1416,66 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// metaobjectFieldsToArray converts a map of field key->value into the
+// [{key, value}] array format required by Shopify's MetaobjectFieldInput.
+func metaobjectFieldsToArray(fields map[string]interface{}) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(fields))
+	for k, v := range fields {
+		val := fmt.Sprintf("%v", v)
+		result = append(result, map[string]interface{}{
+			"key":   k,
+			"value": val,
+		})
+	}
+	return result
+}
+
+// isMetaobjectDefinition returns true if the item represents a metaobject definition
+// (as opposed to a metaobject entry).
+func isMetaobjectDefinition(item Item) bool {
+	if item.CustomData == nil {
+		return false
+	}
+	isDef, _ := item.CustomData["isDefinition"].(bool)
+	return isDef
+}
+
+// restoreMetaobjectDefinitionFromItem creates a metaobject definition from a restore item.
+func (e *MutationExecutor) restoreMetaobjectDefinitionFromItem(ctx context.Context, item Item, conflictMode ConflictMode) (string, error) {
+	defType, _ := item.CustomData["definitionType"].(string)
+	if defType == "" {
+		return "", fmt.Errorf("metaobject definition type is required")
+	}
+
+	fieldDefsRaw, _ := item.CustomData["fieldDefinitions"]
+
+	def := MetaobjectDefinition{
+		ID:   item.ID,
+		Type: defType,
+		Name: item.Title,
+	}
+
+	switch fd := fieldDefsRaw.(type) {
+	case []interface{}:
+		for _, f := range fd {
+			if fMap, ok := f.(map[string]interface{}); ok {
+				fdEntry := FieldDefinition{
+					Key:  fmt.Sprintf("%v", fMap["key"]),
+					Name: fmt.Sprintf("%v", fMap["name"]),
+				}
+				if typeName, ok := fMap["type"].(string); ok {
+					fdEntry.Type = FieldDefinitionType{Name: typeName}
+				} else if typeMap, ok := fMap["type"].(map[string]interface{}); ok {
+					fdEntry.Type = FieldDefinitionType{Name: fmt.Sprintf("%v", typeMap["name"])}
+				}
+				def.FieldDefinitions = append(def.FieldDefinitions, fdEntry)
+			}
+		}
+	case []FieldDefinition:
+		def.FieldDefinitions = fd
+	}
+
+	return e.RestoreMetaobjectDefinition(ctx, def)
 }

@@ -129,10 +129,16 @@ func (cm *CredentialManager) credKey(storeURL string) string {
 func GetOrPromptConfig(cfg *Config) error {
 	cm := NewCredentialManager()
 
-	// If store is set but token is missing, try saved credentials
-	if cfg.Store != "" && cfg.AccessToken == "" {
+	// If store is set but auth is missing, try saved credentials
+	if cfg.Store != "" && cfg.AccessToken == "" && (cfg.ClientID == "" || cfg.ClientSecret == "") {
 		if cred, err := cm.Load(cfg.Store); err == nil {
-			cfg.AccessToken = cred.AccessToken
+			// Prefer saved client credentials over access token (they auto-refresh)
+			if cred.ClientID != "" && cred.ClientSecret != "" {
+				cfg.ClientID = cred.ClientID
+				cfg.ClientSecret = cred.ClientSecret
+			} else if cred.AccessToken != "" {
+				cfg.AccessToken = cred.AccessToken
+			}
 			if cfg.APIVersion == "" || cfg.APIVersion == APIVersion {
 				cfg.APIVersion = cred.APIVersion
 			}

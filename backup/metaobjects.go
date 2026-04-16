@@ -298,7 +298,7 @@ func (m *MetaobjectsModule) RunREST(ctx context.Context, graphqlClient *shopify.
 			var result struct {
 				Data struct {
 					Metaobjects struct {
-						Nodes []map[string]interface{} `json:"nodes"`
+						Nodes    []map[string]interface{} `json:"nodes"`
 						PageInfo struct {
 							HasNextPage bool   `json:"hasNextPage"`
 							EndCursor   string `json:"endCursor"`

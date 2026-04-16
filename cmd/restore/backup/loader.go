@@ -87,12 +87,12 @@ func (l *Loader) LoadBackup(date string) (*Backup, error) {
 	}
 
 	backup := &Backup{
-		Date:    status.StartedAt,
-		Path:    backupPath,
-		Status:  status,
-		Products:  make([]*Product, 0),
-		Customers: make([]*Customer, 0),
-		Orders:    make([]*Order, 0),
+		Date:        status.StartedAt,
+		Path:        backupPath,
+		Status:      status,
+		Products:    make([]*Product, 0),
+		Customers:   make([]*Customer, 0),
+		Orders:      make([]*Order, 0),
 		Collections: make([]*Collection, 0),
 		Metaobjects: &MetaobjectData{
 			Definitions: make([]MetaobjectDefinition, 0),
@@ -119,6 +119,8 @@ func (l *Loader) LoadEntity(date string, entityType EntityType) ([]Item, error) 
 		filePath = filepath.Join(backupPath, "collections.json")
 	case EntityMetaobjects:
 		return l.loadMetaobjectItems(backupPath)
+	case EntityPages:
+		filePath = filepath.Join(backupPath, "pages.json")
 	default:
 		return nil, fmt.Errorf("unsupported entity type: %s", entityType)
 	}
@@ -161,14 +163,14 @@ func (l *Loader) loadMetaobjectItems(backupPath string) ([]Item, error) {
 	// Create items from definitions (for definition restore)
 	for _, def := range definitions {
 		items = append(items, Item{
-			ID:    def.ID,
-			Title: def.Name,
+			ID:     def.ID,
+			Title:  def.Name,
 			Handle: def.Type,
 			Status: "active",
 			CustomData: map[string]interface{}{
-				"definitionType":     def.Type,
-				"fieldDefinitions":   def.FieldDefinitions,
-				"isDefinition":       true,
+				"definitionType":   def.Type,
+				"fieldDefinitions": def.FieldDefinitions,
+				"isDefinition":     true,
 			},
 		})
 	}
@@ -210,15 +212,15 @@ func (l *Loader) loadMetaobjectItems(backupPath string) ([]Item, error) {
 
 			defType := typeName
 			items = append(items, Item{
-				ID:    me.ID,
-				Title: me.Handle,
+				ID:     me.ID,
+				Title:  me.Handle,
 				Handle: me.Handle,
 				Status: "active",
 				CustomData: map[string]interface{}{
 					"metaobjectDefinition": defType,
-					"metaobjectKey":       me.Handle,
-					"metaobjectFields":    fields,
-					"isEntry":             true,
+					"metaobjectKey":        me.Handle,
+					"metaobjectFields":     fields,
+					"isEntry":              true,
 				},
 			})
 		}
@@ -266,6 +268,15 @@ func (l *Loader) parseItems(data []byte, entityType EntityType) ([]Item, error) 
 		}
 		for _, c := range collections {
 			items = append(items, c.ToItem())
+		}
+
+	case EntityPages:
+		var pages []Page
+		if err := json.Unmarshal(data, &pages); err != nil {
+			return nil, fmt.Errorf("failed to parse pages: %w", err)
+		}
+		for _, p := range pages {
+			items = append(items, p.ToItem())
 		}
 	}
 
@@ -328,21 +339,21 @@ type BackupInfo struct {
 
 // BackupStatus represents the status of a backup
 type BackupStatus struct {
-	StartedAt   time.Time             `json:"startedAt"`
-	CompletedAt time.Time             `json:"completedAt,omitempty"`
-	Duration    string                `json:"duration,omitempty"`
+	StartedAt   time.Time               `json:"startedAt"`
+	CompletedAt time.Time               `json:"completedAt,omitempty"`
+	Duration    string                  `json:"duration,omitempty"`
 	Modules     map[string]ModuleStatus `json:"modules"`
-	TotalSize   int64                 `json:"totalSize,omitempty"`
+	TotalSize   int64                   `json:"totalSize,omitempty"`
 }
 
 // ModuleStatus represents the status of a single backup module
 type ModuleStatus struct {
-	Status     string    `json:"status"` // "pending", "running", "completed", "failed"
-	StartedAt  time.Time `json:"startedAt"`
+	Status      string    `json:"status"` // "pending", "running", "completed", "failed"
+	StartedAt   time.Time `json:"startedAt"`
 	CompletedAt time.Time `json:"completedAt,omitempty"`
-	Count      int       `json:"count"`
-	Error      string    `json:"error,omitempty"`
-	FileSize   int64     `json:"fileSize,omitempty"`
+	Count       int       `json:"count"`
+	Error       string    `json:"error,omitempty"`
+	FileSize    int64     `json:"fileSize,omitempty"`
 }
 
 // EntityType for backup package
@@ -354,33 +365,34 @@ const (
 	EntityOrders      EntityType = "orders"
 	EntityCollections EntityType = "collections"
 	EntityMetaobjects EntityType = "metaobjects"
+	EntityPages       EntityType = "pages"
 )
 
 // Item for backup package
 type Item struct {
-	ID         string
-	Title      string
-	Handle     string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	Status     string
-	Tags       []string
-	CustomData map[string]interface{}
-	Price      *string
-	VariantCount *int
-	Email      *string
-	OrderCount *int
-	OrderNumber *string
-	FinancialStatus *string
+	ID                string
+	Title             string
+	Handle            string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Status            string
+	Tags              []string
+	CustomData        map[string]interface{}
+	Price             *string
+	VariantCount      *int
+	Email             *string
+	OrderCount        *int
+	OrderNumber       *string
+	FinancialStatus   *string
 	FulfillmentStatus *string
-	ProductsCount *int
-	Type       *string
+	ProductsCount     *int
+	Type              *string
 	// Rich data fields for restore
-	Variants    []ProductVariant
-	Metafields  []Metafield
-	Addresses   []CustomerAddress
+	Variants           []ProductVariant
+	Metafields         []Metafield
+	Addresses          []CustomerAddress
 	CollectionProducts []string // Product GIDs
-	Images      []ProductImage
+	Images             []ProductImage
 }
 
 // Product entity types
@@ -448,15 +460,15 @@ type ProductImage struct {
 
 // Customer entity
 type Customer struct {
-	ID        string
-	Email     string
-	FirstName string
-	LastName  string
-	Phone     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	State     string
-	Addresses []CustomerAddress
+	ID         string
+	Email      string
+	FirstName  string
+	LastName   string
+	Phone      string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	State      string
+	Addresses  []CustomerAddress
 	Metafields []Metafield
 }
 
@@ -522,28 +534,28 @@ func (o *Order) ToItem() Item {
 	name := o.Name
 	orderNumber := fmt.Sprintf("%d", o.OrderNumber)
 	return Item{
-		ID:               o.ID,
-		Title:            name,
-		Handle:           strings.ToLower(strings.ReplaceAll(name, " ", "-")),
+		ID:                o.ID,
+		Title:             name,
+		Handle:            strings.ToLower(strings.ReplaceAll(name, " ", "-")),
 		CreatedAt:         o.CreatedAt,
 		UpdatedAt:         o.UpdatedAt,
-		Status:           o.FulfillmentStatus,
-		OrderNumber:      &orderNumber,
-		FinancialStatus:  &o.FinancialStatus,
+		Status:            o.FulfillmentStatus,
+		OrderNumber:       &orderNumber,
+		FinancialStatus:   &o.FinancialStatus,
 		FulfillmentStatus: &o.FulfillmentStatus,
-		Tags:             []string{},
-		CustomData:       make(map[string]interface{}),
+		Tags:              []string{},
+		CustomData:        make(map[string]interface{}),
 	}
 }
 
 // LineItem represents an order line item
 type LineItem struct {
-	ID      string
-	Title   string
+	ID       string
+	Title    string
 	Quantity int
-	Price   string
-	SKU     string
-	Variant *LineItemVariant
+	Price    string
+	SKU      string
+	Variant  *LineItemVariant
 }
 
 // LineItemVariant represents a line item variant
@@ -603,17 +615,17 @@ func (c *Collection) ToItem() Item {
 		productIDs[i] = p.ID
 	}
 	return Item{
-		ID:                c.ID,
-		Title:             c.Title,
-		Handle:            c.Handle,
-		CreatedAt:         c.CreatedAt,
-		UpdatedAt:         c.UpdatedAt,
-		Status:            "active",
-		ProductsCount:     &count,
-		Tags:              []string{},
-		CustomData:        make(map[string]interface{}),
+		ID:                 c.ID,
+		Title:              c.Title,
+		Handle:             c.Handle,
+		CreatedAt:          c.CreatedAt,
+		UpdatedAt:          c.UpdatedAt,
+		Status:             "active",
+		ProductsCount:      &count,
+		Tags:               []string{},
+		CustomData:         make(map[string]interface{}),
 		CollectionProducts: productIDs,
-		Metafields:        c.Metafields,
+		Metafields:         c.Metafields,
 	}
 }
 
@@ -676,6 +688,36 @@ type MetaobjectEntry struct {
 type MetaobjectField struct {
 	Key   string
 	Value interface{}
+}
+
+// Page represents a page from backup (Shopify REST API format)
+type Page struct {
+	ID             int64  `json:"id"`
+	Title          string `json:"title"`
+	BodyHTML       string `json:"body_html"`
+	Handle         string `json:"handle"`
+	Author         string `json:"author"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	TemplateSuffix string `json:"template_suffix"`
+	PublishedAt    string `json:"published_at"`
+	ShopifyThemeID int    `json:"shopify_theme_id"`
+}
+
+// ToItem converts a Page to an Item
+func (p *Page) ToItem() Item {
+	return Item{
+		ID:     fmt.Sprintf("%d", p.ID),
+		Title:  p.Title,
+		Handle: p.Handle,
+		Status: "active",
+		CustomData: map[string]interface{}{
+			"body_html":       p.BodyHTML,
+			"template_suffix": p.TemplateSuffix,
+			"author":          p.Author,
+			"published_at":    p.PublishedAt,
+		},
+	}
 }
 
 // DateFormat constant

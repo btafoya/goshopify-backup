@@ -21,6 +21,11 @@ const (
 	RestoreRetryDelay = 2 * time.Second
 )
 
+// Token refresh buffer — refresh this far before expiry to avoid stale tokens
+const (
+	TokenRefreshBuffer = 60 * time.Second
+)
+
 // TUI Configuration
 const (
 	RefreshInterval = 500 * time.Millisecond
@@ -66,6 +71,7 @@ var EntityTypes = []EntityType{
 	EntityOrders,
 	EntityCollections,
 	EntityMetaobjects,
+	EntityPages,
 }
 
 // EntityDisplayNames maps entity types to display names
@@ -75,6 +81,7 @@ var EntityDisplayNames = map[EntityType]string{
 	EntityOrders:      "Orders",
 	EntityCollections: "Collections",
 	EntityMetaobjects: "Metaobjects",
+	EntityPages:       "Pages",
 }
 
 // Status Values
@@ -103,9 +110,9 @@ const (
 
 // Conflict Resolutions
 const (
-	ResolutionSkip     = "skip"
+	ResolutionSkip      = "skip"
 	ResolutionOverwrite = "overwrite"
-	ResolutionRename   = "rename"
+	ResolutionRename    = "rename"
 )
 
 // Error Codes
@@ -122,12 +129,12 @@ const (
 
 // Exit Codes
 const (
-	ExitSuccess       = 0
-	ExitFailed        = 1
-	ExitConfigError   = 2
-	ExitUserAborted   = 3
+	ExitSuccess         = 0
+	ExitFailed          = 1
+	ExitConfigError     = 2
+	ExitUserAborted     = 3
 	ExitValidationError = 4
-	ExitNetworkError  = 5
+	ExitNetworkError    = 5
 )
 
 // Image Policies

@@ -35,9 +35,9 @@ func TestRestoreItem_UnsupportedType(t *testing.T) {
 	executor := NewMutationExecutor(client)
 
 	item := Item{
-		ID:     "gid://shopify/Unknown/1",
-		Title:  "Unknown",
-		Type:   "unknown",
+		ID:    "gid://shopify/Unknown/1",
+		Title: "Unknown",
+		Type:  "unknown",
 	}
 
 	_, err := executor.RestoreItem(context.Background(), item, ConflictSkip)
@@ -79,23 +79,23 @@ func TestApplyRestoreTag(t *testing.T) {
 		wantTags []string
 	}{
 		{
-			name:  "adds tag to empty tags",
-			input: Item{ID: "1", Tags: []string{}},
+			name:     "adds tag to empty tags",
+			input:    Item{ID: "1", Tags: []string{}},
 			wantTags: []string{RestoreTag},
 		},
 		{
-			name:  "adds tag to existing tags",
-			input: Item{ID: "1", Tags: []string{"existing"}},
+			name:     "adds tag to existing tags",
+			input:    Item{ID: "1", Tags: []string{"existing"}},
 			wantTags: []string{"existing", RestoreTag},
 		},
 		{
-			name:  "does not duplicate tag",
-			input: Item{ID: "1", Tags: []string{RestoreTag}},
+			name:     "does not duplicate tag",
+			input:    Item{ID: "1", Tags: []string{RestoreTag}},
 			wantTags: []string{RestoreTag},
 		},
 		{
-			name:  "handles nil tags",
-			input: Item{ID: "1", Tags: nil},
+			name:     "handles nil tags",
+			input:    Item{ID: "1", Tags: nil},
 			wantTags: []string{RestoreTag},
 		},
 	}
@@ -149,10 +149,10 @@ func TestRestoreCustomer_MissingEmail(t *testing.T) {
 	executor := NewMutationExecutor(client)
 
 	item := Item{
-		ID:     "gid://shopify/Customer/1",
-		Title:  "Test Customer",
-		Type:   EntityCustomers,
-		Email:  nil,
+		ID:    "gid://shopify/Customer/1",
+		Title: "Test Customer",
+		Type:  EntityCustomers,
+		Email: nil,
 	}
 
 	_, err := executor.restoreCustomer(context.Background(), item, ConflictSkip)
@@ -182,16 +182,16 @@ func TestRestoreValidator(t *testing.T) {
 
 	email := "test@example.com"
 	v.ValidateItem(Item{
-		ID:    "1",
-		Title: "Product",
+		ID:     "1",
+		Title:  "Product",
 		Handle: "product",
 		Type:   EntityProducts,
 		Tags:   []string{},
 	})
 
 	v.ValidateItem(Item{
-		ID:    "2",
-		Title: "",
+		ID:     "2",
+		Title:  "",
 		Handle: "",
 		Type:   EntityProducts,
 		Tags:   []string{},
@@ -200,8 +200,8 @@ func TestRestoreValidator(t *testing.T) {
 	v.ValidateItem(Item{
 		ID:    "3",
 		Title: "Customer",
-		Type:   EntityCustomers,
-		Email:  &email,
+		Type:  EntityCustomers,
+		Email: &email,
 	})
 
 	if !v.HasWarnings() {
@@ -219,8 +219,8 @@ func TestRestoreValidator_MissingCustomerEmail(t *testing.T) {
 	v.ValidateItem(Item{
 		ID:    "1",
 		Title: "Customer",
-		Type:   EntityCustomers,
-		Email:  nil,
+		Type:  EntityCustomers,
+		Email: nil,
 	})
 
 	if !v.HasErrors() {

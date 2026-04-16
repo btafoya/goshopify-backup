@@ -289,7 +289,7 @@ func TestLoadEntity_UnsupportedType(t *testing.T) {
 	tmpDir := t.TempDir()
 	loader := NewLoader(tmpDir)
 
-	_, err := loader.LoadEntity("2026-04-15", "pages")
+	_, err := loader.LoadEntity("2026-04-15", "blogs")
 	if err == nil {
 		t.Error("LoadEntity() should error for unsupported type")
 	}
@@ -384,5 +384,35 @@ func TestCollectionToItem(t *testing.T) {
 	}
 	if len(item.Metafields) != 1 {
 		t.Errorf("Metafields length = %d, want 1", len(item.Metafields))
+	}
+}
+func TestPageToItem(t *testing.T) {
+	p := Page{
+		ID:             157126590767,
+		Title:          "About",
+		BodyHTML:       "<p>Hello</p>",
+		Handle:         "about",
+		Author:         "admin",
+		TemplateSuffix: "about",
+		PublishedAt:    "2026-04-01T12:03:50-04:00",
+	}
+
+	item := p.ToItem()
+	if item.ID != "157126590767" {
+		t.Errorf("ID = %q, want %q", item.ID, "157126590767")
+	}
+	if item.Title != "About" {
+		t.Errorf("Title = %q, want %q", item.Title, "About")
+	}
+	if item.Handle != "about" {
+		t.Errorf("Handle = %q, want %q", item.Handle, "about")
+	}
+	bodyHTML, _ := item.CustomData["body_html"].(string)
+	if bodyHTML != "<p>Hello</p>" {
+		t.Errorf("body_html = %q, want %q", bodyHTML, "<p>Hello</p>")
+	}
+	templateSuffix, _ := item.CustomData["template_suffix"].(string)
+	if templateSuffix != "about" {
+		t.Errorf("template_suffix = %q, want %q", templateSuffix, "about")
 	}
 }

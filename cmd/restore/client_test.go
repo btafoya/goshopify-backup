@@ -224,3 +224,124 @@ func TestDoWithRetry_429(t *testing.T) {
 		t.Errorf("Expected retry on 429, only called %d times", callCount)
 	}
 }
+
+func TestNewShopifyClientWithCredentials(t *testing.T) {
+	client := NewShopifyClientWithCredentials("https://test.myshopify.com", "client123", "secret456", "2025-07", false)
+	if client.StoreURL != "https://test.myshopify.com" {
+		t.Errorf("StoreURL = %q, want %q", client.StoreURL, "https://test.myshopify.com")
+	}
+	if client.ClientID != "client123" {
+		t.Errorf("ClientID = %q, want %q", client.ClientID, "client123")
+	}
+	if client.ClientSecret != "secret456" {
+		t.Errorf("ClientSecret = %q, want %q", client.ClientSecret, "secret456")
+	}
+	if client.AccessToken != "" {
+		t.Errorf("AccessToken should be empty before authentication, got %q", client.AccessToken)
+	}
+	if client.DryRun {
+		t.Error("DryRun should be false")
+	}
+}
+
+func TestAuthenticate_DirectToken(t *testing.T) {
+	client := NewShopifyClient("https://test.myshopify.com", "shpat_test", "2025-07", false)
+	err := client.Authenticate(context.Background())
+	if err != nil {
+		t.Errorf("Authenticate() with direct token should not error: %v", err)
+	}
+	if client.AccessToken != "shpat_test" {
+		t.Errorf("AccessToken = %q, want %q", client.AccessToken, "shpat_test")
+	}
+}
+
+func TestAuthenticate_ClientCredentials(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("Expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/admin/oauth/access_token" {
+			t.Errorf("Expected /admin/oauth/access_token, got %s", r.URL.Path)
+		}
+		if r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
+			t.Errorf("Expected Content-Type application/x-www-form-urlencoded")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"access_token":"shpat_fetched_token","scope":"read_products,write_products","expires_in":86399}`))
+	}))
+	defer tokenServer.Close()
+
+	// Extract host from test server URL for StoreURL
+	storeURL := tokenServer.URL
+	client := NewShopifyClientWithCredentials(storeURL, "test_client_id", "test_client_secret", "2025-07", false)
+	// Override HTTPClient to use test server's client
+	client.HTTPClient = tokenServer.Client()
+
+	err := client.Authenticate(context.Background())
+	if err != nil {
+		t.Fatalf("Authenticate() error: %v", err)
+	}
+	if client.AccessToken != "shpat_fetched_token" {
+		t.Errorf("AccessToken = %q, want %q", client.AccessToken, "shpat_fetched_token")
+	}
+}
+
+func TestAuthenticate_ClientCredentials_CachedToken(t *testing.T) {
+	callCount := 0
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"access_token":"shpat_cached_token","scope":"read_products","expires_in":86399}`))
+	}))
+	defer tokenServer.Close()
+
+	storeURL := tokenServer.URL
+	client := NewShopifyClientWithCredentials(storeURL, "test_client_id", "test_client_secret", "2025-07", false)
+	client.HTTPClient = tokenServer.Client()
+
+	// First call should fetch token
+	err := client.Authenticate(context.Background())
+	if err != nil {
+		t.Fatalf("First Authenticate() error: %v", err)
+	}
+	if client.AccessToken != "shpat_cached_token" {
+		t.Errorf("AccessToken = %q, want %q", client.AccessToken, "shpat_cached_token")
+	}
+
+	// Second call should use cached token without hitting the server again
+	err = client.Authenticate(context.Background())
+	if err != nil {
+		t.Fatalf("Second Authenticate() error: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("Expected 1 token fetch call, got %d (cached token should not re-fetch)", callCount)
+	}
+}
+
+func TestAuthenticate_NoCredentials(t *testing.T) {
+	client := &ShopifyClient{
+		StoreURL:   "https://test.myshopify.com",
+		APIVersion: "2025-07",
+		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+	}
+	err := client.Authenticate(context.Background())
+	if err == nil {
+		t.Error("Authenticate() should return error when no credentials provided")
+	}
+}
+
+func TestAuthenticate_ClientCredentials_ServerError(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(401)
+		w.Write([]byte(`{"error":"invalid_client"}`))
+	}))
+	defer tokenServer.Close()
+
+	client := NewShopifyClientWithCredentials(tokenServer.URL, "bad_id", "bad_secret", "2025-07", false)
+	client.HTTPClient = tokenServer.Client()
+
+	err := client.Authenticate(context.Background())
+	if err == nil {
+		t.Error("Authenticate() should return error on 401 response")
+	}
+}

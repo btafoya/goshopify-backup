@@ -11,6 +11,7 @@ const (
 	EntityOrders      EntityType = "orders"
 	EntityCollections EntityType = "collections"
 	EntityMetaobjects EntityType = "metaobjects"
+	EntityPages       EntityType = "pages"
 )
 
 func (e EntityType) String() string {
@@ -22,15 +23,15 @@ type State int
 
 const (
 	StateConfig       State = iota // Configure target store
-	StateBackupSelect             // Select backup directory
-	StateEntitySelect             // Select entity type
-	StateItemSelect               // Select items to restore
-	StatePreview                  // Preview changes
-	StateConfirm                  // Confirm restore
-	StateRunning                  // Restore in progress
-	StateComplete                 // Restore completed
-	StateError                    // Error state
-	StateAbort                    // Abort confirmation
+	StateBackupSelect              // Select backup directory
+	StateEntitySelect              // Select entity type
+	StateItemSelect                // Select items to restore
+	StatePreview                   // Preview changes
+	StateConfirm                   // Confirm restore
+	StateRunning                   // Restore in progress
+	StateComplete                  // Restore completed
+	StateError                     // Error state
+	StateAbort                     // Abort confirmation
 )
 
 func (s State) String() string {
@@ -67,9 +68,11 @@ type Config struct {
 	BackupDate string // Specific backup date (empty = latest)
 
 	// Target Store
-	Store       string // Target store URL
-	AccessToken string // Shopify access token
-	APIVersion  string // Shopify API version
+	Store        string // Target store URL
+	AccessToken  string // Shopify access token (direct)
+	ClientID     string // Shopify app client ID (for client credentials flow)
+	ClientSecret string // Shopify app client secret (for client credentials flow)
+	APIVersion   string // Shopify API version
 
 	// Behavior
 	DryRun        bool        // Validate only, don't restore
@@ -96,21 +99,21 @@ type BackupInfo struct {
 
 // BackupStatus represents the status of a backup
 type BackupStatus struct {
-	StartedAt   time.Time             `json:"startedAt"`
-	CompletedAt time.Time             `json:"completedAt,omitempty"`
-	Duration    string                `json:"duration,omitempty"`
+	StartedAt   time.Time               `json:"startedAt"`
+	CompletedAt time.Time               `json:"completedAt,omitempty"`
+	Duration    string                  `json:"duration,omitempty"`
 	Modules     map[string]ModuleStatus `json:"modules"`
-	TotalSize   int64                 `json:"totalSize,omitempty"`
+	TotalSize   int64                   `json:"totalSize,omitempty"`
 }
 
 // ModuleStatus represents the status of a single backup module
 type ModuleStatus struct {
-	Status     string    `json:"status"` // "pending", "running", "completed", "failed"
-	StartedAt  time.Time `json:"startedAt"`
+	Status      string    `json:"status"` // "pending", "running", "completed", "failed"
+	StartedAt   time.Time `json:"startedAt"`
 	CompletedAt time.Time `json:"completedAt,omitempty"`
-	Count      int       `json:"count"`
-	Error      string    `json:"error,omitempty"`
-	FileSize   int64     `json:"fileSize,omitempty"`
+	Count       int       `json:"count"`
+	Error       string    `json:"error,omitempty"`
+	FileSize    int64     `json:"fileSize,omitempty"`
 }
 
 // Item represents a single entity item
@@ -126,43 +129,49 @@ type Item struct {
 	Type       EntityType
 
 	// Product-specific fields
-	Description   string
-	ProductType   string
-	Vendor        string
-	Price         *string
-	VariantCount  *int
-	Variants      []ProductVariant
-	Images        []Image
-	Metafields    []Metafield
-	SEO           *SEOInfo
+	Description  string
+	ProductType  string
+	Vendor       string
+	Price        *string
+	VariantCount *int
+	Variants     []ProductVariant
+	Images       []Image
+	Metafields   []Metafield
+	SEO          *SEOInfo
 
 	// Customer-specific fields
-	Email       *string
-	FirstName   string
-	LastName    string
-	Phone       string
-	OrderCount  *int
-	Addresses   []CustomerAddress
+	Email      *string
+	FirstName  string
+	LastName   string
+	Phone      string
+	OrderCount *int
+	Addresses  []CustomerAddress
 
 	// Order-specific fields
-	OrderNumber      *string
-	FinancialStatus  *string
+	OrderNumber       *string
+	FinancialStatus   *string
 	FulfillmentStatus *string
-	LineItems        []interface{}
-	Customer         interface{}
-	BillingAddress   interface{}
-	ShippingAddress  interface{}
-	Note             string
+	LineItems         []interface{}
+	Customer          interface{}
+	BillingAddress    interface{}
+	ShippingAddress   interface{}
+	Note              string
 
 	// Collection-specific fields
-	ProductsCount   *int
+	ProductsCount      *int
 	CollectionProducts []string // Product GIDs from backup
-	CollectionRules []interface{}
+	CollectionRules    []interface{}
 
 	// Metaobject-specific fields
-	Key                 string
+	Key                  string
 	MetaobjectDefinition *string
-	MetaobjectFields   map[string]interface{}
+	MetaobjectFields     map[string]interface{}
+
+	// Page-specific fields
+	BodyHTML       string
+	TemplateSuffix string
+	Author         string
+	PublishedAt    *time.Time
 }
 
 // SEOInfo represents SEO information
@@ -234,13 +243,13 @@ type LogEntry struct {
 
 // RollbackScript contains commands to revert a restore
 type RollbackScript struct {
-	GeneratedAt time.Time
-	TargetStore string
-	BackupDate  string
-	CreatedAt   time.Time
+	GeneratedAt  time.Time
+	TargetStore  string
+	BackupDate   string
+	CreatedAt    time.Time
 	Instructions []string
-	Commands    []string
-	Actions     []RollbackAction
+	Commands     []string
+	Actions      []RollbackAction
 }
 
 // RollbackAction represents a single rollback action
@@ -254,29 +263,29 @@ type RollbackAction struct {
 
 // RestoreState represents the state for resume functionality
 type RestoreState struct {
-	StartedAt    time.Time                       `json:"startedAt"`
-	BackupDate   string                          `json:"backupDate"`
-	TargetStore  string                          `json:"targetStore"`
-	SelectedItems map[EntityType][]string        `json:"selectedItems"`
-	CompletedItems []CompletedItem               `json:"completedItems"`
-	FailedItems  []FailedItem                   `json:"failedItems"`
-	Progress     ProgressState                  `json:"progress"`
+	StartedAt      time.Time               `json:"startedAt"`
+	BackupDate     string                  `json:"backupDate"`
+	TargetStore    string                  `json:"targetStore"`
+	SelectedItems  map[EntityType][]string `json:"selectedItems"`
+	CompletedItems []CompletedItem         `json:"completedItems"`
+	FailedItems    []FailedItem            `json:"failedItems"`
+	Progress       ProgressState           `json:"progress"`
 }
 
 // CompletedItem represents a successfully restored item
 type CompletedItem struct {
 	EntityType  EntityType `json:"entityType"`
-	SourceID    string      `json:"sourceId"`
-	TargetID    string      `json:"targetId"`
-	CompletedAt time.Time   `json:"completedAt"`
+	SourceID    string     `json:"sourceId"`
+	TargetID    string     `json:"targetId"`
+	CompletedAt time.Time  `json:"completedAt"`
 }
 
 // FailedItem represents a failed restore item
 type FailedItem struct {
 	EntityType EntityType `json:"entityType"`
-	SourceID   string    `json:"sourceId"`
-	Error      string    `json:"error"`
-	FailedAt   time.Time `json:"failedAt"`
+	SourceID   string     `json:"sourceId"`
+	Error      string     `json:"error"`
+	FailedAt   time.Time  `json:"failedAt"`
 }
 
 // ProgressState represents progress for resume
@@ -288,11 +297,13 @@ type ProgressState struct {
 
 // Credential represents saved store credentials
 type Credential struct {
-	Store       string    `json:"store"`
-	AccessToken string    `json:"access_token"`
-	APIVersion  string    `json:"api_version"`
-	LastUsed    time.Time `json:"last_used"`
-	Nickname    string    `json:"nickname,omitempty"`
+	Store        string    `json:"store"`
+	AccessToken  string    `json:"access_token,omitempty"`
+	ClientID     string    `json:"client_id,omitempty"`
+	ClientSecret string    `json:"client_secret,omitempty"`
+	APIVersion   string    `json:"api_version"`
+	LastUsed     time.Time `json:"last_used"`
+	Nickname     string    `json:"nickname,omitempty"`
 }
 
 // Entity interface for all entity types
@@ -325,49 +336,49 @@ type Product struct {
 
 // ProductVariant represents a product variant
 type ProductVariant struct {
-	ID               string
-	Title            string
-	Price            string
-	SKU              string
+	ID                string
+	Title             string
+	Price             string
+	SKU               string
 	InventoryQuantity int
-	CompareAtPrice   string
-	Metafields       []Metafield
+	CompareAtPrice    string
+	Metafields        []Metafield
 }
 
 // ProductImage represents a product image
 type ProductImage struct {
-	ID        string
-	Src       string
-	AltText   string
-	Width     int
-	Height    int
-	Position  int
+	ID       string
+	Src      string
+	AltText  string
+	Width    int
+	Height   int
+	Position int
 }
 
 // Customer represents a customer from backup
 type Customer struct {
-	ID        string
-	Email     string
-	FirstName string
-	LastName  string
-	Phone     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	State     string
-	Addresses []CustomerAddress
+	ID         string
+	Email      string
+	FirstName  string
+	LastName   string
+	Phone      string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	State      string
+	Addresses  []CustomerAddress
 	Metafields []Metafield
 }
 
 // CustomerAddress represents a customer address
 type CustomerAddress struct {
-	ID        string
-	Address1  string
-	Address2  string
-	City      string
-	Province  string
-	Country   string
-	Zip       string
-	Phone     string
+	ID       string
+	Address1 string
+	Address2 string
+	City     string
+	Province string
+	Country  string
+	Zip      string
+	Phone    string
 }
 
 // Order represents an order from backup
@@ -397,12 +408,12 @@ type Order struct {
 
 // LineItem represents an order line item
 type LineItem struct {
-	ID        string
-	Title     string
-	Quantity  int
-	Price     string
-	SKU       string
-	Variant   *LineItemVariant
+	ID       string
+	Title    string
+	Quantity int
+	Price    string
+	SKU      string
+	Variant  *LineItemVariant
 }
 
 // LineItemVariant represents a line item variant
@@ -421,11 +432,11 @@ type OrderTransaction struct {
 
 // OrderFulfillment represents an order fulfillment
 type OrderFulfillment struct {
-	ID               string
-	Status           string
-	TrackingCompany  string
-	TrackingNumber   string
-	TrackingInfoURL  string
+	ID              string
+	Status          string
+	TrackingCompany string
+	TrackingNumber  string
+	TrackingInfoURL string
 }
 
 // OrderRefund represents an order refund
@@ -462,9 +473,9 @@ type CollectionProduct struct {
 
 // CollectionRule represents a smart collection rule
 type CollectionRule struct {
-	Column    string
-	Relation  string
-	Value     string
+	Column   string
+	Relation string
+	Value    string
 }
 
 // Metafield represents a metafield
@@ -514,4 +525,17 @@ type MetaobjectField struct {
 type MetaobjectData struct {
 	Definitions []MetaobjectDefinition
 	Entries     map[string][]MetaobjectEntry // Type -> Entries
+}
+
+// Page represents a page from backup
+type Page struct {
+	ID             string
+	Title          string
+	Handle         string
+	BodyHTML       string
+	Author         string
+	TemplateSuffix string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	PublishedAt    *time.Time
 }

@@ -14,21 +14,24 @@ import (
 
 // RestoreExecutor manages the restore process
 type RestoreExecutor struct {
-	client         *ShopifyClient
-	mutation       *MutationExecutor
-	progress       *RestoreProgress
-	progressChan   chan *RestoreProgress
-	resultChan     chan *RestoreResult
-	logger         *log.Logger
-	conflictMode   ConflictMode
-	cancelFunc     context.CancelFunc
-	mu             sync.Mutex
-	completedIDs   map[string]bool     // Tracks completed item IDs for resume (O1)
-	rollbackActions []RollbackAction   // Tracks actions for rollback script (O2)
-	rollbackMu     sync.Mutex
-	stateFile      string              // Path to .restore_state.json
-	paused         bool
-	pauseMu        sync.Mutex
+	client          *ShopifyClient
+	mutation        *MutationExecutor
+	progress        *RestoreProgress
+	progressChan    chan *RestoreProgress
+	resultChan      chan *RestoreResult
+	logger          *log.Logger
+	conflictMode    ConflictMode
+	cancelFunc      context.CancelFunc
+	mu              sync.Mutex
+	completedIDs    map[string]bool  // Tracks completed item IDs for resume (O1)
+	rollbackActions []RollbackAction // Tracks actions for rollback script (O2)
+	rollbackMu      sync.Mutex
+	stateFile       string // Path to .restore_state.json
+	paused          bool
+	pauseMu         sync.Mutex
+	done            chan struct{}   // Closed when ExecuteRestore finishes
+	results         []RestoreResult // Final results after execution
+	execErr         error           // Final error after execution
 }
 
 // NewRestoreExecutor creates a new restore executor
@@ -53,6 +56,9 @@ func (e *RestoreExecutor) SetStateFile(path string) {
 
 // ExecuteRestore executes the restore process
 func (e *RestoreExecutor) ExecuteRestore(ctx context.Context, items []Item) ([]RestoreResult, error) {
+	e.done = make(chan struct{})
+	defer close(e.done)
+
 	ctx, cancel := context.WithCancel(ctx)
 	e.cancelFunc = cancel
 	defer cancel()
@@ -80,7 +86,10 @@ func (e *RestoreExecutor) ExecuteRestore(ctx context.Context, items []Item) ([]R
 		CurrentItems:   make(map[string]bool),
 	}
 
-	e.progressChan <- e.progress
+	select {
+	case e.progressChan <- e.progress:
+	default:
+	}
 
 	// Create worker pool
 	numWorkers := MaxConcurrentUploads
@@ -97,10 +106,25 @@ func (e *RestoreExecutor) ExecuteRestore(ctx context.Context, items []Item) ([]R
 	}
 
 	// Send items to workers (skip already completed for resume)
+	// Metaobject definitions must be processed before entries so that
+	// the target store has the definition when entries reference it.
 	go func() {
-		for _, item := range items {
+		definitions, otherItems := partitionMetaobjectDefinitions(items)
+		// Send definitions first
+		for _, item := range definitions {
 			if resumeSet[item.ID] {
-				continue // Already completed in previous run
+				continue
+			}
+			select {
+			case itemChan <- item:
+			case <-ctx.Done():
+				return
+			}
+		}
+		// Then send all other items (including metaobject entries)
+		for _, item := range otherItems {
+			if resumeSet[item.ID] {
+				continue
 			}
 			select {
 			case itemChan <- item:
@@ -118,7 +142,6 @@ func (e *RestoreExecutor) ExecuteRestore(ctx context.Context, items []Item) ([]R
 	e.progress.Status = "completed"
 	e.progress.CompletedAt = time.Now()
 	e.progress.Duration = e.progress.CompletedAt.Sub(e.progress.StartTime)
-	e.progressChan <- e.progress
 
 	close(e.progressChan)
 	close(e.resultChan)
@@ -128,6 +151,8 @@ func (e *RestoreExecutor) ExecuteRestore(ctx context.Context, items []Item) ([]R
 		os.Remove(e.stateFile)
 	}
 
+	e.results = results
+	e.execErr = nil
 	return results, nil
 }
 
@@ -214,11 +239,17 @@ func (e *RestoreExecutor) processItem(ctx context.Context, item Item, resultsMu 
 		e.saveResumeState(item, result)
 	}
 
-	// Send progress update
-	e.progressChan <- e.progress
+	// Send progress update (non-blocking — TUI polls via GetProgress)
+	select {
+	case e.progressChan <- e.progress:
+	default:
+	}
 
-	// Send result
-	e.resultChan <- result
+	// Send result (non-blocking — results collected in local slice)
+	select {
+	case e.resultChan <- result:
+	default:
+	}
 
 	// Store result
 	resultsMu.Lock()
@@ -231,11 +262,11 @@ func (e *RestoreExecutor) processItem(ctx context.Context, item Item, resultsMu 
 // saveResumeState persists restore state after each item
 func (e *RestoreExecutor) saveResumeState(item Item, result *RestoreResult) {
 	state := &RestoreState{
-		StartedAt:    e.progress.StartTime,
-		BackupDate:   "",
-		TargetStore:  e.client.StoreURL,
+		StartedAt:      e.progress.StartTime,
+		BackupDate:     "",
+		TargetStore:    e.client.StoreURL,
 		CompletedItems: []CompletedItem{},
-		FailedItems:  []FailedItem{},
+		FailedItems:    []FailedItem{},
 	}
 
 	// Load existing state
@@ -337,8 +368,22 @@ func (e *RestoreExecutor) GetRollbackScript(backupDate string) *RollbackScript {
 		"set -e",
 		"",
 		fmt.Sprintf("STORE=\"%s\"", e.client.StoreURL),
-		fmt.Sprintf("TOKEN=\"${SHOPIFY_ACCESS_TOKEN:-}\""),
-		"if [ -z \"$TOKEN\" ]; then echo \"Error: SHOPIFY_ACCESS_TOKEN not set\"; exit 1; fi",
+		"",
+		"# Get access token: either directly or via client credentials",
+		"TOKEN=\"${SHOPIFY_ACCESS_TOKEN:-}\"",
+		"if [ -z \"$TOKEN\" ]; then",
+		"  CLIENT_ID=\"${SHOPIFY_CLIENT_ID:-}\"",
+		"  CLIENT_SECRET=\"${SHOPIFY_SECRET:-}\"",
+		"  if [ -z \"$CLIENT_ID\" ] || [ -z \"$CLIENT_SECRET\" ]; then",
+		"    echo \"Error: SHOPIFY_ACCESS_TOKEN or both SHOPIFY_CLIENT_ID and SHOPIFY_SECRET must be set\"",
+		"    exit 1",
+		"  fi",
+		"  TOKEN=$(curl -s -X POST \"${STORE}/admin/oauth/access_token\" \\",
+		"    -H \"Content-Type: application/x-www-form-urlencoded\" \\",
+		"    -d \"grant_type=client_credentials&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}\" \\",
+		"    | jq -r '.access_token' 2>/dev/null)",
+		"  if [ -z \"$TOKEN\" ]; then echo \"Error: Failed to obtain access token via client credentials\"; exit 1; fi",
+		"fi",
 		"",
 		"echo \"Starting rollback...\"",
 		"",
@@ -361,18 +406,31 @@ func (e *RestoreExecutor) GetRollbackScript(backupDate string) *RollbackScript {
 				deleteMutation = `{"query":"mutation{collectionDelete(input:{id:\"` + action.ID + `\"}){deletedId userErrors{message}}}"}`
 			case EntityMetaobjects:
 				deleteMutation = `{"query":"mutation{metaobjectDelete(id:\"` + action.ID + `\"){deletedId userErrors{message}}}"}`
+			case EntityPages:
+				deleteMutation = "" // Pages use REST DELETE
 			default:
 				deleteMutation = `{"query":"mutation{metaobjectDelete(id:\"` + action.ID + `\"){deletedId userErrors{message}}}"}`
 			}
 
-			script.Commands = append(script.Commands,
-				fmt.Sprintf("curl -s -X POST \"${STORE}/admin/api/%s/graphql.json\" \\", e.client.APIVersion),
-				"  -H \"X-Shopify-Access-Token: ${TOKEN}\" \\",
-				"  -H \"Content-Type: application/json\" \\",
-				fmt.Sprintf("  -d '%s'", deleteMutation),
-				"echo \"\"",
-				"",
-			)
+			if action.EntityType == EntityPages {
+				// Pages use REST API for deletion
+				script.Commands = append(script.Commands,
+					fmt.Sprintf("curl -s -X DELETE \"${STORE}/admin/api/%s/pages/%s.json\" \\", e.client.APIVersion, action.ID),
+					"  -H \"X-Shopify-Access-Token: ${TOKEN}\" \\",
+					"  -H \"Content-Type: application/json\"",
+					"echo \"\"",
+					"",
+				)
+			} else {
+				script.Commands = append(script.Commands,
+					fmt.Sprintf("curl -s -X POST \"${STORE}/admin/api/%s/graphql.json\" \\", e.client.APIVersion),
+					"  -H \"X-Shopify-Access-Token: ${TOKEN}\" \\",
+					"  -H \"Content-Type: application/json\" \\",
+					fmt.Sprintf("  -d '%s'", deleteMutation),
+					"echo \"\"",
+					"",
+				)
+			}
 		}
 	}
 
@@ -382,7 +440,7 @@ func (e *RestoreExecutor) GetRollbackScript(backupDate string) *RollbackScript {
 
 	script.Instructions = append(script.Instructions,
 		"To rollback this restore:",
-		"  1. Set SHOPIFY_ACCESS_TOKEN environment variable",
+		"  1. Set SHOPIFY_ACCESS_TOKEN (or SHOPIFY_CLIENT_ID + SHOPIFY_SECRET) environment variable",
 		"  2. Review the generated commands",
 		"  3. Run: chmod +x rollback.sh && ./rollback.sh",
 	)
@@ -419,11 +477,15 @@ func (e *RestoreExecutor) GetResultChan() <-chan *RestoreResult {
 	return e.resultChan
 }
 
-// GetProgress returns the current progress
+// GetProgress returns a snapshot of the current progress (safe for concurrent access)
 func (e *RestoreExecutor) GetProgress() *RestoreProgress {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.progress
+	if e.progress == nil {
+		return &RestoreProgress{}
+	}
+	p := *e.progress
+	return &p
 }
 
 // Cancel cancels the restore operation
@@ -431,4 +493,29 @@ func (e *RestoreExecutor) Cancel() {
 	if e.cancelFunc != nil {
 		e.cancelFunc()
 	}
+}
+
+// Done returns a channel that is closed when ExecuteRestore finishes
+func (e *RestoreExecutor) Done() <-chan struct{} {
+	return e.done
+}
+
+// GetResults returns the final results and error after execution completes
+func (e *RestoreExecutor) GetResults() ([]RestoreResult, error) {
+	return e.results, e.execErr
+}
+
+// partitionMetaobjectDefinitions separates metaobject definition items from other items
+// so definitions can be processed first during restore.
+func partitionMetaobjectDefinitions(items []Item) (definitions, other []Item) {
+	for _, item := range items {
+		if item.Type == EntityMetaobjects && item.CustomData != nil {
+			if isDef, _ := item.CustomData["isDefinition"].(bool); isDef {
+				definitions = append(definitions, item)
+				continue
+			}
+		}
+		other = append(other, item)
+	}
+	return
 }

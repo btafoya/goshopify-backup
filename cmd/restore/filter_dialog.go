@@ -5,30 +5,30 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 // FilterDialogModel represents the advanced filter dialog
 type FilterDialogModel struct {
-	visible    bool
-	selection  int  // Currently selected filter option
-	cursor     int  // For multi-option filters
-	width      int
-	height     int
+	visible   bool
+	selection int // Currently selected filter option
+	cursor    int // For multi-option filters
+	width     int
+	height    int
 
 	// Filter values
-	searchText  string
+	searchText   string
 	statusFilter string
-	tagFilter   string
-	dateFrom    string
-	dateTo      string
+	tagFilter    string
+	dateFrom     string
+	dateTo       string
 
 	// Text inputs for value entry
-	textInput   textinput.Model
-	inputMode   bool // true when entering text
+	textInput textinput.Model
+	inputMode bool // true when entering text
 
 	// Viewport for scrollable content
 	viewport viewport.Model

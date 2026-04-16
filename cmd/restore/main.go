@@ -63,7 +63,9 @@ OPTIONS:
     --backup-dir DIR      Backup directory (default: /backups/shopify)
     --backup-date DATE    Specific backup date to restore (YYYY-MM-DD)
     --store URL           Target Shopify store URL
-    --token TOKEN         Shopify access token
+    --token TOKEN         Shopify access token (or use client credentials)
+    --client-id ID        Shopify app client ID (for client credentials flow)
+    --client-secret SECRET Shopify app client secret (for client credentials flow)
     --dry-run, -n         Validate only, don't restore
     --force, -f           Skip conflict prompts, use defaults
     --resume              Resume from interrupted restore
@@ -75,7 +77,9 @@ OPTIONS:
 
 ENVIRONMENT VARIABLES:
     SHOPIFY_STORE         Target store URL (https://*.myshopify.com)
-    SHOPIFY_ACCESS_TOKEN  Shopify access token
+    SHOPIFY_ACCESS_TOKEN  Shopify access token (or use client credentials)
+    SHOPIFY_CLIENT_ID     Shopify app client ID (with SHOPIFY_SECRET)
+    SHOPIFY_SECRET        Shopify app client secret (with SHOPIFY_CLIENT_ID)
     SHOPIFY_API_VERSION   Shopify API version (default: 2025-07)
     BACKUP_DIR            Backup directory (default: /backups/shopify)
     LOG_DIR               Log directory (default: /var/log/goshopify)
@@ -100,6 +104,10 @@ EXAMPLES:
     # Non-interactive with flags
     shopify-restore --backup-dir /backups/shopify --backup-date 2026-04-02 \\
         --store staging.myshopify.com --token shpat_xxxx
+
+    # Using client credentials (auto-refreshes tokens)
+    shopify-restore --backup-dir /backups/shopify --backup-date 2026-04-02 \\
+        --store staging.myshopify.com --client-id fe076d2b --client-secret shpss_xxxx
 
     # Dry-run (validate only)
     shopify-restore --dry-run

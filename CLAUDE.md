@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Pure Go CLI tool that dumps Shopify store data nightly to a directory as flat JSON files. This is a greenfield project - implementation is planned but not yet started.
+Go CLI tools for Shopify store data backup and restore. The backup tool dumps store data nightly to flat JSON files; the restore tool provides a TUI for selectively restoring data from those backups.
 
 ## Critical Rules
 
@@ -18,10 +18,87 @@ Pure Go CLI tool that dumps Shopify store data nightly to a directory as flat JS
 
 ### ALWAYS
 
+- Use context7 for reference
 - Commit as author: **btafoya** — no AI attribution in messages
 - Follow `.claude/skills/anti-slop/SKILL.md` for quality standards
 - Follow `.claude/skills/golang-pro/SKILL.md`
 - Follow `.claude/skills/shopify-admin-graphql/SKILL.md`
+
+
+## Build Process
+
+This repo contains **two separate Go modules** — they must be built independently:
+
+| Binary | Module | Source | Build Command |
+|---|---|---|---|
+| `goshopify-backup` | `github.com/btafoya/goshopify-backup` | `./` (project root) | `go build -o bin/goshopify-backup .` |
+| `goshopify-restore` | `github.com/btafoya/goshopify-restore` | `./cmd/restore/` | `cd cmd/restore && go build -o ../../bin/goshopify-restore .` |
+
+All binaries output to `bin/`. Use the Makefile for standard builds:
+
+```bash
+make              # Build both binaries (default: make all)
+make build-backup    # Build backup only
+make build-restore   # Build restore only
+make build-prod      # Production builds (stripped, CGO_ENABLED=0)
+make test            # Run all tests (both modules)
+make check           # fmt + vet + lint + test
+make clean           # Remove bin/ and coverage files
+```
+
+**Common pitfall**: Running `go build .` from the project root builds the *backup* binary, not the restore binary. The restore binary must be built from `cmd/restore/`. Use `make` to avoid this.
+
+### Docker
+
+Multi-stage Dockerfile (`docker/Dockerfile`) builds the backup binary only:
+- Build stage: `golang:1.23-alpine`, `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`
+- Runtime stage: `alpine:latest`, non-root user (65534:65534)
+- Resource limits: CPU 1 core, Memory 512Mi
+- `docker-compose.yml` passes `SHOPIFY_ACCESS_TOKEN`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_SECRET` as env vars
+
+
+## Shopify Authentication
+
+The restore tool supports two authentication methods:
+
+### Method 1: Direct Access Token (legacy)
+Set `SHOPIFY_ACCESS_TOKEN` — a long-lived token from the Shopify Admin. Sent directly in the `X-Shopify-Access-Token` header on every API call.
+
+### Method 2: Client Credentials (recommended)
+Set `SHOPIFY_CLIENT_ID` + `SHOPIFY_SECRET` — uses the [Shopify OAuth client_credentials grant](https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/client-credentials-grant) to obtain a short-lived access token.
+
+**Flow** (`cmd/restore/client.go: ShopifyClient.Authenticate()`):
+
+1. If `AccessToken` is already set (direct token), skip OAuth — no-op
+2. Check in-memory token cache; if cached token has >60s until expiry, reuse it
+3. POST to `{STORE_URL}/admin/oauth/access_token` with form body:
+   - `grant_type=client_credentials`
+   - `client_id={SHOPIFY_CLIENT_ID}`
+   - `client_secret={SHOPIFY_SECRET}`
+4. Parse response: `access_token`, `scope`, `expires_in` (~86399s / 24 hours)
+5. Cache token + expiry; set `AccessToken` on client for all subsequent API calls
+6. All API calls use `X-Shopify-Access-Token: {token}` header regardless of auth method
+
+**Key constants** (`cmd/restore/constants.go`):
+- `TokenRefreshBuffer = 60s` — cached token is refreshed this far before expiry
+- Token lifetime from Shopify: ~86399 seconds (24 hours)
+
+**Validation** (`cmd/restore/config.go: ValidateConfig()`):
+- When `SHOPIFY_STORE` is set, requires either `SHOPIFY_ACCESS_TOKEN` OR both `SHOPIFY_CLIENT_ID` + `SHOPIFY_SECRET`
+- Providing `SHOPIFY_CLIENT_ID` without `SHOPIFY_SECRET` (or vice versa) is an error
+- If both are provided, `SHOPIFY_ACCESS_TOKEN` takes precedence
+
+**Credential persistence** (`cmd/restore/credentials.go`):
+- Saved to `~/.config/goshopify/credentials.json`
+- `Credential` struct stores `ClientID`/`ClientSecret` (preferred) or `AccessToken`
+- `GetOrPromptConfig` loads saved credentials when env vars are missing; prefers client credentials over access tokens
+
+**Rollback scripts** (`cmd/restore/executor.go`):
+- Generated shell scripts support both auth methods
+- Token obtained via `curl` + `jq` in the script if no `SHOPIFY_ACCESS_TOKEN` is set
+- Requires `jq` installed on the target machine for client credentials token extraction
+
+**Client credentials are only available for apps developed by your own organization and installed in stores you own** — see Shopify docs for `shop_not_permitted` error handling.
 
 
 ## Environment Variables
@@ -29,10 +106,14 @@ Pure Go CLI tool that dumps Shopify store data nightly to a directory as flat JS
 | Variable | Required | Default | Validation |
 |---|---|---|---|
 | `SHOPIFY_STORE` | Yes | - | Must be valid HTTPS URL (https://*.myshopify.com) |
-| `SHOPIFY_ACCESS_TOKEN` | Yes | - | Non-empty string |
+| `SHOPIFY_ACCESS_TOKEN` | Conditional* | - | Non-empty string; required unless using client credentials |
+| `SHOPIFY_CLIENT_ID` | Conditional* | - | Required with `SHOPIFY_SECRET` when not using access token |
+| `SHOPIFY_SECRET` | Conditional* | - | Required with `SHOPIFY_CLIENT_ID` when not using access token |
 | `SHOPIFY_API_VERSION` | No | `2025-01` | Must be valid Shopify API version |
 | `BACKUP_DIR` | No | `/backups/shopify` | Must be writable directory |
 | `RETENTION_DAYS` | No | `30` | Must be 1-3650 |
+
+*Authentication requires either `SHOPIFY_ACCESS_TOKEN` OR both `SHOPIFY_CLIENT_ID` and `SHOPIFY_SECRET`. Client credentials use OAuth client_credentials grant to obtain a short-lived access token (24h expiry, auto-refreshed).
 
 **IMPORTANT**: All environment variables are validated at startup. Tool exits with code 2 if validation fails.
 
@@ -76,7 +157,23 @@ shopify-backup/
 │   └── lock.go              # Concurrent backup prevention (.lock file)
 ├── recovery/
 │   └── recovery.go          # Partial backup recovery
-└── cleanup.go                # Retention cleanup
+├── cleanup.go                # Retention cleanup
+│
+└── cmd/restore/              # Separate Go module (github.com/btafoya/goshopify-restore)
+    ├── main.go               # Entry point, .env loading, TUI launch
+    ├── config.go             # Env var reading + CLI flag parsing + validation
+    ├── client.go             # Shopify API client, OAuth token exchange, rate limiter, retry
+    ├── types.go              # Config, Credential, entity types
+    ├── constants.go          # API version, rate limits, token refresh buffer
+    ├── credentials.go        # Credential persistence (~/.config/goshopify/credentials.json)
+    ├── tui_model.go          # Bubbletea TUI state machine
+    ├── tui_view.go           # TUI rendering
+    ├── mutations.go          # GraphQL mutation definitions
+    ├── executor.go           # Restore execution, rollback script generation
+    ├── images.go             # Image upload via stagedUploadsCreate
+    ├── validator.go          # Pre-restore item validation
+    ├── backup/               # Backup data loader (shared package)
+    └── entity/               # Entity-specific restore logic
 ```
 
 ## Key Design Decisions
@@ -121,7 +218,7 @@ Buffered channel writer with 5-second flush interval. Each module sends non-bloc
 ### Startup Validation
 All environment variables validated before any backup work begins:
 - SHOPIFY_STORE must be valid HTTPS URL
-- SHOPIFY_ACCESS_TOKEN must be non-empty
+- Authentication: either SHOPIFY_ACCESS_TOKEN or both SHOPIFY_CLIENT_ID + SHOPIFY_SECRET required when store is specified
 - SHOPIFY_API_VERSION must match format `^\d{4}-\d{2}$`
 - BACKUP_DIR must be writable (create if doesn't exist)
 - RETENTION_DAYS clamped to 1-3650 range (warn if clamped)
@@ -156,23 +253,41 @@ Prevents concurrent backups for same date:
 
 ## Commands
 
-Once implemented:
-
 ```bash
+# Build both binaries
+make
+
+# Build individually
+make build-backup
+make build-restore
+
+# Production build (stripped)
+make build-prod
+
 # Run backup
 go run main.go
+# or
+make run
 
 # Force re-run (override completed modules)
 go run main.go --force
 
-# Run tests
-go test ./...
+# Run restore (interactive TUI)
+cd cmd/restore && go run main.go
+# or
+make run-restore
 
-# Run specific test
-go test ./jsonl -run TestReconstructBulkData
+# Run restore with client credentials
+cd cmd/restore && go run main.go --store https://store.myshopify.com --client-id ID --client-secret SECRET
 
-# Build binary
-go build -o shopify-backup main.go
+# Run all tests
+make test
+
+# Run all quality checks
+make check
+
+# Clean build artifacts
+make clean
 ```
 
 ## Important Constants

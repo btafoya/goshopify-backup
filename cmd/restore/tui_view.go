@@ -235,7 +235,7 @@ func (m Model) renderProgress() string {
 	}
 
 	// Current item
-	if m.restoreProgress.CurrentItem != "" {
+	if m.restoreProgress != nil && m.restoreProgress.CurrentItem != "" {
 		b.WriteString(lipgloss.NewStyle().
 			Foreground(colorDim).
 			Render(fmt.Sprintf("\nItem: %s", m.restoreProgress.CurrentItem)))
@@ -298,13 +298,13 @@ func (m Model) renderComplete() string {
 	b.WriteString(lipgloss.NewStyle().
 		Foreground(colorSuccess).
 		Render(fmt.Sprintf("%s Successfully restored: %d item(s)",
-		RenderSuccess("✓"), successCount)))
+			RenderSuccess("✓"), successCount)))
 
 	if failedCount > 0 {
 		b.WriteString(lipgloss.NewStyle().
 			Foreground(colorError).
-		Render(fmt.Sprintf("\n%s Failed: %d item(s)",
-			RenderError("✗"), failedCount)))
+			Render(fmt.Sprintf("\n%s Failed: %d item(s)",
+				RenderError("✗"), failedCount)))
 	}
 
 	// Rollback info
@@ -312,7 +312,7 @@ func (m Model) renderComplete() string {
 		b.WriteString(lipgloss.NewStyle().
 			Foreground(colorInfo).
 			Render(fmt.Sprintf("\n\nRollback script saved to: %s/rollback_%s.sh",
-			m.cfg.RollbackDir, m.selectedDate)))
+				m.cfg.RollbackDir, m.selectedDate)))
 	}
 
 	return b.String()
@@ -392,8 +392,8 @@ func (m Model) formatItem(item Item) string {
 // countSelectedItems counts total selected items across all entity types
 func (m Model) countSelectedItems() int {
 	count := 0
-	for _, items := range m.selectedItems {
-		count += len(items)
+	for _, state := range m.entityStates {
+		count += len(state.selected)
 	}
 	return count
 }
@@ -447,6 +447,7 @@ func (m Model) renderView(title, content string) string {
 
 	return b.String()
 }
+
 // hasActiveFilters returns true if any filters are active
 func hasActiveFilters(filters FilterCriteria) bool {
 	return filters.SearchText != "" ||
