@@ -1,0 +1,32 @@
+🚀 Ensuring metaobject definitions...
+⏭️ Exists: faq_categories
+➕ Creating definition: faq_item
+❌ Definition failed:
+{
+  "data": {
+    "metaobjectDefinitionCreate": {
+      "metaobjectDefinition": null,
+      "userErrors": [
+        {
+          "field": [
+            "definition",
+            "fieldDefinitions",
+            "2"
+          ],
+          "message": "Validations require that you select a metaobject."
+        }
+      ]
+    }
+  },
+  "extensions": {
+    "cost": {
+      "requestedQueryCost": 10,
+      "actualQueryCost": 10,
+      "throttleStatus": {
+        "maximumAvailable": 2000.0,
+        "currentlyAvailable": 1990,
+        "restoreRate": 100.0
+      }
+    }
+  }
+}

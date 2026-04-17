@@ -45,3 +45,5 @@ cinemasterpieces-dev-keep.zip
 .dolt/
 *.db
 .beads-credential-key
+php_ports/vendor/
+!php_ports/vendor/bin/
