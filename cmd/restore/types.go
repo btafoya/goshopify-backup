@@ -12,6 +12,7 @@ const (
 	EntityCollections EntityType = "collections"
 	EntityMetaobjects EntityType = "metaobjects"
 	EntityPages       EntityType = "pages"
+	EntityThemes      EntityType = "themes"
 )
 
 func (e EntityType) String() string {

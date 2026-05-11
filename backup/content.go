@@ -53,16 +53,22 @@ type Article struct {
 	Tags              string `json:"tags"`
 }
 
+// ShopMetafield mirrors Shopify's REST /metafields.json response.
+// Value is json.RawMessage because Shopify encodes the metafield value
+// according to its Type field — booleans come back as JSON bool, numbers
+// as JSON number, json metafields as nested objects/arrays, and only
+// text-like types as strings. RawMessage preserves the original encoding
+// so backups can be restored verbatim.
 type ShopMetafield struct {
-	ID            int64  `json:"id"`
-	Namespace     string `json:"namespace"`
-	Key           string `json:"key"`
-	Value         string `json:"value"`
-	Type          string `json:"type"`
-	OwnerID       int64  `json:"owner_id"`
-	OwnerResource string `json:"owner_resource"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ID            int64           `json:"id"`
+	Namespace     string          `json:"namespace"`
+	Key           string          `json:"key"`
+	Value         json.RawMessage `json:"value"`
+	Type          string          `json:"type"`
+	OwnerID       int64           `json:"owner_id"`
+	OwnerResource string          `json:"owner_resource"`
+	CreatedAt     string          `json:"created_at"`
+	UpdatedAt     string          `json:"updated_at"`
 }
 
 // ContentModule backs up pages, blogs, articles, and shop metafields using REST API

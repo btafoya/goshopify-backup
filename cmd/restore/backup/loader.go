@@ -121,6 +121,8 @@ func (l *Loader) LoadEntity(date string, entityType EntityType) ([]Item, error) 
 		return l.loadMetaobjectItems(backupPath)
 	case EntityPages:
 		filePath = filepath.Join(backupPath, "pages.json")
+	case EntityThemes:
+		return l.loadThemeItems(backupPath)
 	default:
 		return nil, fmt.Errorf("unsupported entity type: %s", entityType)
 	}
@@ -224,6 +226,115 @@ func (l *Loader) loadMetaobjectItems(backupPath string) ([]Item, error) {
 				},
 			})
 		}
+	}
+
+	return items, nil
+}
+
+// ThemeBackupEntry is the JSON shape written by the backup tool's themes.json.
+type ThemeBackupEntry struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Role      string `json:"role"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// ThemeMetaEntry mirrors backup/themes.go ThemeMeta written to .meta.json.
+type ThemeMetaEntry struct {
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	Role          string `json:"role"`
+	UpdatedAt     string `json:"updated_at"`
+	SchemaVersion string `json:"schema_version"`
+	OS2           bool   `json:"online_store_2"`
+	CLIVersion    string `json:"shopify_cli_version"`
+}
+
+// loadThemeItems reads the themes/ directory from a backup. Each subdirectory
+// under themes/ is a theme; themes.json is the list snapshot from the backup
+// run. Each theme's .meta.json is merged when present for richer Item metadata.
+func (l *Loader) loadThemeItems(backupPath string) ([]Item, error) {
+	themesDir := filepath.Join(backupPath, "themes")
+	if _, err := os.Stat(themesDir); os.IsNotExist(err) {
+		return []Item{}, nil
+	}
+
+	// Load list snapshot (best-effort)
+	listByID := make(map[int64]ThemeBackupEntry)
+	if data, err := os.ReadFile(filepath.Join(themesDir, "themes.json")); err == nil {
+		var entries []ThemeBackupEntry
+		if err := json.Unmarshal(data, &entries); err == nil {
+			for _, e := range entries {
+				listByID[e.ID] = e
+			}
+		}
+	}
+
+	dirs, err := os.ReadDir(themesDir)
+	if err != nil {
+		return nil, fmt.Errorf("read themes dir: %w", err)
+	}
+
+	var items []Item
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		// Theme dir names are stringified theme IDs
+		themeIDStr := d.Name()
+		themeDir := filepath.Join(themesDir, themeIDStr)
+
+		var themeID int64
+		fmt.Sscanf(themeIDStr, "%d", &themeID)
+
+		name := themeIDStr
+		role := ""
+		updatedAt := ""
+		schemaVersion := ""
+		os2 := false
+		cliVersion := ""
+
+		if entry, ok := listByID[themeID]; ok {
+			name = entry.Name
+			role = entry.Role
+			updatedAt = entry.UpdatedAt
+		}
+
+		if metaData, err := os.ReadFile(filepath.Join(themeDir, ".meta.json")); err == nil {
+			var meta ThemeMetaEntry
+			if err := json.Unmarshal(metaData, &meta); err == nil {
+				if meta.Name != "" {
+					name = meta.Name
+				}
+				if meta.Role != "" {
+					role = meta.Role
+				}
+				if meta.UpdatedAt != "" {
+					updatedAt = meta.UpdatedAt
+				}
+				schemaVersion = meta.SchemaVersion
+				os2 = meta.OS2
+				cliVersion = meta.CLIVersion
+			}
+		}
+
+		items = append(items, Item{
+			ID:     themeIDStr,
+			Title:  fmt.Sprintf("%s (%s)", name, role),
+			Handle: themeIDStr,
+			Status: role,
+			CustomData: map[string]interface{}{
+				"isTheme":        true,
+				"themePath":      themeDir,
+				"themeName":      name,
+				"themeRole":      role,
+				"sourceID":       themeID,
+				"updatedAt":      updatedAt,
+				"schemaVersion":  schemaVersion,
+				"onlineStore2":   os2,
+				"cliVersion":     cliVersion,
+			},
+		})
 	}
 
 	return items, nil
@@ -366,6 +477,7 @@ const (
 	EntityCollections EntityType = "collections"
 	EntityMetaobjects EntityType = "metaobjects"
 	EntityPages       EntityType = "pages"
+	EntityThemes      EntityType = "themes"
 )
 
 // Item for backup package

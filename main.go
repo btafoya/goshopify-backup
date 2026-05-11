@@ -20,8 +20,10 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// Expected backup modules in execution order
-var expectedModules = []string{"products", "customers", "orders", "collections", "content", "metaobjects", "redirects"}
+// Expected backup modules in execution order.
+// "themes" runs last because the Shopify CLI shell-out is heavier than the
+// other modules and benefits from running sequentially after Go modules drain.
+var expectedModules = []string{"products", "customers", "orders", "collections", "content", "metaobjects", "redirects", "themes"}
 
 func main() {
 	// Load .env file if it exists
@@ -186,7 +188,7 @@ func main() {
 	}
 
 	// Run modules
-	backupSuccess := runModules(ctx, graphqlClient, restClient, statusWriter, modulesToRun, backupDir, log)
+	backupSuccess := runModules(ctx, graphqlClient, restClient, authenticator, cfg.Store, statusWriter, modulesToRun, backupDir, log)
 
 	// Mark backup complete
 	if err := statusWriter.MarkBackupComplete(); err != nil {
@@ -365,7 +367,7 @@ func loadExistingStatus(backupDir string) (*status.Writer, error) {
 }
 
 // runModules runs the backup modules
-func runModules(ctx context.Context, graphqlClient *shopify.GraphQLClient, restClient *shopify.RESTClient, statusWriter *status.Writer, modules []string, outputDir string, log *logger.Logger) bool {
+func runModules(ctx context.Context, graphqlClient *shopify.GraphQLClient, restClient *shopify.RESTClient, authenticator *auth.Authenticator, store string, statusWriter *status.Writer, modules []string, outputDir string, log *logger.Logger) bool {
 	success := true
 
 	for _, moduleName := range modules {
@@ -424,6 +426,10 @@ func runModules(ctx context.Context, graphqlClient *shopify.GraphQLClient, restC
 		case "redirects":
 			redirectsMod := backup.NewRedirectsModule()
 			count, fileSize, fallback, err = runRedirectsWithFallback(ctx, graphqlClient, restClient, redirectsMod, outputDir)
+
+		case "themes":
+			themesMod := backup.NewThemesModule(store, authenticator, log)
+			count, fileSize, err = themesMod.Run(ctx, outputDir)
 		}
 
 		duration := time.Since(startTime)

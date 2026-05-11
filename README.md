@@ -126,10 +126,21 @@ make run-force
 │   ├── metaobject-definitions.json
 │   ├── {type}.json           # Per metaobject type (e.g., size_chart.json)
 │   └── ...
-└── images/                   # Product images
-    └── {product_id}/
-        ├── 0.jpg
-        └── ...
+├── images/                   # Product images
+│   └── {product_id}/
+│       ├── 0.jpg
+│       └── ...
+└── themes/                   # Shopify themes (via Shopify CLI)
+    ├── themes.json           # Snapshot of `shopify theme list --json`
+    └── {theme_id}/
+        ├── layout/
+        ├── templates/
+        ├── sections/
+        ├── snippets/
+        ├── assets/
+        ├── config/
+        ├── locales/
+        └── .meta.json        # role, name, schema_version, cli_version, backed_up_at
 ```
 
 ## Backup Modules
@@ -145,6 +156,23 @@ The tool runs backup modules in the following order:
 | `content` | REST API | `pages.json`, `blogs.json`, `metafields.json` |
 | `metaobjects` | GraphQL pagination | `metaobjects/*.json` |
 | `redirects` | GraphQL bulk (REST fallback) | `url-redirects.json` |
+| `themes` | Shopify CLI (`shopify theme pull`) | `themes/{id}/`, `themes/themes.json` |
+
+The `themes` module runs last and sequentially after all other modules complete. It shells out to the Shopify CLI (`@shopify/cli`) — bundled into the Docker image, auto-installed via `npm install -g` on Linux hosts, or required as a prerequisite on macOS/Windows.
+
+## Security
+
+**Backup contents are sensitive.** Treat the backup directory as a credential store:
+
+- `themes/{id}/config/settings_data.json` often contains third-party API keys (Klaviyo, Mailchimp, Yotpo, custom integrations) entered through the theme editor. Backups capture these verbatim.
+- The `themes/` directory is created with `0700` permissions; only the backup user can read it.
+- Recommended deployment hardening:
+  - `chmod 0700` on the entire `BACKUP_DIR` root.
+  - Encrypt the backup volume at rest (LUKS, encrypted EBS, GCP CMEK, etc.).
+  - Never commit backup output to git, even in private repos.
+  - Rotate any third-party secrets if a backup is exposed.
+- Credentials cache (`~/.config/goshopify/credentials.json` or `$GOSHOPIFY_CREDS_FILE`) is written with mode `0600`. The Docker image mounts it at `/credentials/` in an isolated volume.
+- Shopify CLI tokens are passed via `SHOPIFY_CLI_THEME_TOKEN` and `SHOPIFY_FLAG_PASSWORD` environment variables, never via command-line flags, so tokens never appear in `ps aux` output.
 
 ## Make Commands
 

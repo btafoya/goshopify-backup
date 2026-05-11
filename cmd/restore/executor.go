@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -412,7 +413,21 @@ func (e *RestoreExecutor) GetRollbackScript(backupDate string) *RollbackScript {
 				deleteMutation = `{"query":"mutation{metaobjectDelete(id:\"` + action.ID + `\"){deletedId userErrors{message}}}"}`
 			}
 
-			if action.EntityType == EntityPages {
+			if action.EntityType == EntityThemes {
+				// Themes use the Shopify CLI for deletion.
+				// Action ID is "gid://shopify/OnlineStoreTheme/{id}" — extract the numeric tail.
+				numericID := action.ID
+				if idx := strings.LastIndex(action.ID, "/"); idx >= 0 {
+					numericID = action.ID[idx+1:]
+				}
+				script.Commands = append(script.Commands,
+					"SHOPIFY_CLI_THEME_TOKEN=\"${TOKEN}\" \\",
+					"SHOPIFY_FLAG_PASSWORD=\"${TOKEN}\" \\",
+					fmt.Sprintf("shopify theme delete --force --theme %s --store \"${STORE}\" --no-color", numericID),
+					"echo \"\"",
+					"",
+				)
+			} else if action.EntityType == EntityPages {
 				// Pages use REST API for deletion
 				script.Commands = append(script.Commands,
 					fmt.Sprintf("curl -s -X DELETE \"${STORE}/admin/api/%s/pages/%s.json\" \\", e.client.APIVersion, action.ID),

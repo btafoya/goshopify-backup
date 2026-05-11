@@ -291,9 +291,18 @@ func (a *Authenticator) validateScopes(granted string) error {
 	}
 	var missing []string
 	for _, want := range a.requiredScopes {
-		if _, ok := have[want]; !ok {
-			missing = append(missing, want)
+		if _, ok := have[want]; ok {
+			continue
 		}
+		// Shopify collapses read+write grants into write_* in the OAuth scope
+		// response. write_<resource> is strictly more privileged than
+		// read_<resource>, so accept it as satisfying the read requirement.
+		if resource, ok := strings.CutPrefix(want, "read_"); ok {
+			if _, ok := have["write_"+resource]; ok {
+				continue
+			}
+		}
+		missing = append(missing, want)
 	}
 	if len(missing) > 0 {
 		return &MissingScopesError{Required: a.requiredScopes, Missing: missing, Granted: splitScopes(granted)}

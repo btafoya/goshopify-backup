@@ -16,16 +16,19 @@ type MutationExecutor struct {
 	client           *ShopifyClient
 	conflictResolver *ConflictResolver
 	imageUploader    *ImageUploader
+	themeRestorer    *ThemeRestorer
 	logger           *log.Logger
 }
 
 // NewMutationExecutor creates a new mutation executor
 func NewMutationExecutor(client *ShopifyClient) *MutationExecutor {
+	logger := log.New(os.Stderr)
 	return &MutationExecutor{
 		client:           client,
 		conflictResolver: NewConflictResolver(),
 		imageUploader:    NewImageUploader(client),
-		logger:           log.New(os.Stderr),
+		themeRestorer:    NewThemeRestorer(client, logger),
+		logger:           logger,
 	}
 }
 
@@ -68,6 +71,8 @@ func (e *MutationExecutor) RestoreItem(ctx context.Context, item Item, conflictM
 		}
 	case EntityPages:
 		restoredID, err = e.restorePage(ctx, item, conflictMode)
+	case EntityThemes:
+		restoredID, err = e.restoreTheme(ctx, item)
 	default:
 		err = fmt.Errorf("unsupported entity type: %s", item.Type)
 	}
@@ -83,6 +88,26 @@ func (e *MutationExecutor) RestoreItem(ctx context.Context, item Item, conflictM
 	result.Duration = time.Since(startTime)
 
 	return result, nil
+}
+
+// restoreTheme pushes a backed-up theme directory to Shopify as a new
+// unpublished theme via the Shopify CLI. The new theme is never auto-published;
+// promotion to live happens manually in Shopify admin.
+//
+// Item.CustomData must contain:
+//   - "themePath" (string): absolute path to the theme directory on disk
+//   - "themeName" (string, optional): name to assign the new theme
+func (e *MutationExecutor) restoreTheme(ctx context.Context, item Item) (string, error) {
+	if item.CustomData == nil {
+		return "", fmt.Errorf("theme item missing custom data")
+	}
+	themePath, _ := item.CustomData["themePath"].(string)
+	if themePath == "" {
+		return "", fmt.Errorf("theme item missing themePath")
+	}
+	themeName, _ := item.CustomData["themeName"].(string)
+
+	return e.themeRestorer.RestoreTheme(ctx, themePath, themeName)
 }
 
 // applyRestoreTag appends the restore tag to item tags (D7)

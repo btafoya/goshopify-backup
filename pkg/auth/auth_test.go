@@ -102,6 +102,43 @@ func TestAuthenticate_MissingScopes(t *testing.T) {
 	}
 }
 
+func TestAuthenticate_WriteScopeSatisfiesReadRequirement(t *testing.T) {
+	// Shopify returns only write_X in scope when both read_X + write_X are granted.
+	srv := newOAuthServer(t, "tok-x", "write_products,write_themes,read_orders", 3600)
+	defer srv.Close()
+
+	a := New(Config{
+		StoreURL:       srv.URL,
+		ClientID:       "id",
+		ClientSecret:   "secret",
+		RequiredScopes: []string{"read_products", "read_themes", "read_orders"},
+	})
+	if err := a.Authenticate(context.Background()); err != nil {
+		t.Fatalf("write_X should satisfy read_X requirement, got: %v", err)
+	}
+}
+
+func TestAuthenticate_WriteScopeDoesNotSatisfyDifferentResource(t *testing.T) {
+	// write_themes should NOT satisfy read_products.
+	srv := newOAuthServer(t, "tok-x", "write_themes", 3600)
+	defer srv.Close()
+
+	a := New(Config{
+		StoreURL:       srv.URL,
+		ClientID:       "id",
+		ClientSecret:   "secret",
+		RequiredScopes: []string{"read_products"},
+	})
+	err := a.Authenticate(context.Background())
+	var scopeErr *MissingScopesError
+	if !errors.As(err, &scopeErr) {
+		t.Fatalf("want MissingScopesError, got: %v", err)
+	}
+	if len(scopeErr.Missing) != 1 || scopeErr.Missing[0] != "read_products" {
+		t.Errorf("missing mismatch: %v", scopeErr.Missing)
+	}
+}
+
 func TestEnsureToken_RefreshesOnExpiry(t *testing.T) {
 	var calls atomic.Int32
 	mux := http.NewServeMux()

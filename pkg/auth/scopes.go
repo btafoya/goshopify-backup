@@ -10,6 +10,7 @@ var BackupScopes = []string{
 	"read_content",
 	"read_metaobjects",
 	"read_online_store_pages",
+	"read_themes",
 }
 
 // RestoreScopes lists write scopes required by the restore tool.
@@ -20,4 +21,5 @@ var RestoreScopes = []string{
 	"write_content",
 	"write_metaobjects",
 	"write_online_store_pages",
+	"write_themes",
 }
