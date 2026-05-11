@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/btafoya/goshopify-backup/pkg/auth"
 	"github.com/charmbracelet/log"
 )
 
@@ -30,10 +29,8 @@ type ShopifyClient struct {
 	ClientID     string
 	ClientSecret string
 
-	// Token cache for client credentials flow
-	tokenMu     sync.Mutex
-	cachedToken string
-	tokenExpiry time.Time
+	authMu sync.Mutex
+	auth   *auth.Authenticator
 }
 
 // RateLimiter implements a leaky bucket rate limiter
@@ -122,91 +119,53 @@ func NewShopifyClientWithCredentials(storeURL, clientID, clientSecret, apiVersio
 // Shopify OAuth client_credentials grant, then stores the token for API calls.
 // If an AccessToken was already provided directly, this is a no-op.
 func (c *ShopifyClient) Authenticate(ctx context.Context) error {
-	// Direct access token already set — nothing to do
 	if c.AccessToken != "" {
 		return nil
 	}
-
-	// Must have client credentials if no direct token
 	if c.ClientID == "" || c.ClientSecret == "" {
 		return fmt.Errorf("authentication requires either SHOPIFY_ACCESS_TOKEN or both SHOPIFY_CLIENT_ID and SHOPIFY_SECRET")
 	}
 
-	// Check cached token — refresh 60 seconds before expiry
-	c.tokenMu.Lock()
-	if c.cachedToken != "" && time.Now().Before(c.tokenExpiry.Add(-TokenRefreshBuffer)) {
-		c.AccessToken = c.cachedToken
-		c.tokenMu.Unlock()
-		return nil
+	a := c.ensureAuth()
+	if err := a.Authenticate(ctx); err != nil {
+		return fmt.Errorf("client credentials authentication failed: %w", err)
 	}
-	c.tokenMu.Unlock()
-
-	// Exchange client credentials for access token
-	token, expiresIn, err := c.fetchAccessToken(ctx)
+	token, err := a.EnsureToken(ctx)
 	if err != nil {
 		return fmt.Errorf("client credentials authentication failed: %w", err)
 	}
 
-	c.tokenMu.Lock()
-	c.cachedToken = token
-	c.tokenExpiry = time.Now().Add(time.Duration(expiresIn) * time.Second)
+	c.authMu.Lock()
 	c.AccessToken = token
-	c.tokenMu.Unlock()
+	c.authMu.Unlock()
 
-	c.logger.Infof("Authenticated via client credentials (token expires in %ds)", expiresIn)
+	c.logger.Infof("Authenticated via client credentials (token expires %s)", a.Expiry().Format(time.RFC3339))
 	return nil
 }
 
-// oauthTokenResponse represents the response from the OAuth token endpoint
-type oauthTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	Scope       string `json:"scope"`
-	ExpiresIn   int    `json:"expires_in"`
+// ensureAuth lazily constructs the shared Authenticator.
+func (c *ShopifyClient) ensureAuth() *auth.Authenticator {
+	c.authMu.Lock()
+	defer c.authMu.Unlock()
+	if c.auth == nil {
+		c.auth = auth.New(auth.Config{
+			StoreURL:     c.StoreURL,
+			AccessToken:  c.AccessToken,
+			ClientID:     c.ClientID,
+			ClientSecret: c.ClientSecret,
+			APIVersion:   c.APIVersion,
+			HTTPClient:   c.HTTPClient,
+		})
+	}
+	return c.auth
 }
 
-// fetchAccessToken POSTs to the Shopify OAuth endpoint to exchange client
-// credentials for a short-lived access token.
-func (c *ShopifyClient) fetchAccessToken(ctx context.Context) (string, int, error) {
-	// Build the token URL from the store URL
-	storeBase := strings.TrimSuffix(c.StoreURL, "/")
-	tokenURL := fmt.Sprintf("%s/admin/oauth/access_token", storeBase)
-
-	data := url.Values{}
-	data.Set("grant_type", "client_credentials")
-	data.Set("client_id", c.ClientID)
-	data.Set("client_secret", c.ClientSecret)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		return "", 0, fmt.Errorf("create token request: %w", err)
+// currentToken returns a valid access token, refreshing if needed.
+func (c *ShopifyClient) currentToken(ctx context.Context) (string, error) {
+	if c.ClientID != "" && c.ClientSecret != "" {
+		return c.ensureAuth().EnsureToken(ctx)
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return "", 0, fmt.Errorf("token request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", 0, fmt.Errorf("read token response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", 0, fmt.Errorf("token request returned HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	var tokenResp oauthTokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return "", 0, fmt.Errorf("parse token response: %w", err)
-	}
-
-	if tokenResp.AccessToken == "" {
-		return "", 0, fmt.Errorf("token response missing access_token")
-	}
-
-	return tokenResp.AccessToken, tokenResp.ExpiresIn, nil
+	return c.AccessToken, nil
 }
 
 // Request represents an API request
@@ -256,7 +215,11 @@ func (c *ShopifyClient) Do(ctx context.Context, req Request) (*Response, error) 
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	httpReq.Header.Set("X-Shopify-Access-Token", c.AccessToken)
+	token, err := c.currentToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("auth: %w", err)
+	}
+	httpReq.Header.Set("X-Shopify-Access-Token", token)
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	if req.QueryParams != nil {

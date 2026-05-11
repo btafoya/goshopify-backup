@@ -59,7 +59,7 @@
 				
 				<option value="file1">github.com/btafoya/goshopify-restore/backup/validator.go (0.0%)</option>
 				
-				<option value="file2">github.com/btafoya/goshopify-restore/client.go (80.7%)</option>
+				<option value="file2">github.com/btafoya/goshopify-restore/client.go (81.8%)</option>
 				
 				<option value="file3">github.com/btafoya/goshopify-restore/config.go (0.0%)</option>
 				
@@ -67,7 +67,7 @@
 				
 				<option value="file5">github.com/btafoya/goshopify-restore/conflict.go (52.4%)</option>
 				
-				<option value="file6">github.com/btafoya/goshopify-restore/credentials.go (65.6%)</option>
+				<option value="file6">github.com/btafoya/goshopify-restore/credentials.go (53.3%)</option>
 				
 				<option value="file7">github.com/btafoya/goshopify-restore/entity/common.go (0.0%)</option>
 				
@@ -1000,12 +1000,11 @@ import (
         "fmt"
         "io"
         "net/http"
-        "net/url"
         "os"
-        "strings"
         "sync"
         "time"
 
+        "github.com/btafoya/goshopify-backup/pkg/auth"
         "github.com/charmbracelet/log"
 )
 
@@ -1023,10 +1022,8 @@ type ShopifyClient struct {
         ClientID     string
         ClientSecret string
 
-        // Token cache for client credentials flow
-        tokenMu     sync.Mutex
-        cachedToken string
-        tokenExpiry time.Time
+        authMu sync.Mutex
+        auth   *auth.Authenticator
 }
 
 // RateLimiter implements a leaky bucket rate limiter
@@ -1115,91 +1112,53 @@ func NewShopifyClientWithCredentials(storeURL, clientID, clientSecret, apiVersio
 // Shopify OAuth client_credentials grant, then stores the token for API calls.
 // If an AccessToken was already provided directly, this is a no-op.
 func (c *ShopifyClient) Authenticate(ctx context.Context) error <span class="cov5" title="6">{
-        // Direct access token already set — nothing to do
         if c.AccessToken != "" </span><span class="cov2" title="2">{
                 return nil
         }</span>
-
-        // Must have client credentials if no direct token
         <span class="cov4" title="4">if c.ClientID == "" || c.ClientSecret == "" </span><span class="cov1" title="1">{
                 return fmt.Errorf("authentication requires either SHOPIFY_ACCESS_TOKEN or both SHOPIFY_CLIENT_ID and SHOPIFY_SECRET")
         }</span>
 
-        // Check cached token — refresh 60 seconds before expiry
-        <span class="cov4" title="3">c.tokenMu.Lock()
-        if c.cachedToken != "" &amp;&amp; time.Now().Before(c.tokenExpiry.Add(-TokenRefreshBuffer)) </span><span class="cov0" title="0">{
-                c.AccessToken = c.cachedToken
-                c.tokenMu.Unlock()
-                return nil
+        <span class="cov4" title="3">a := c.ensureAuth()
+        if err := a.Authenticate(ctx); err != nil </span><span class="cov1" title="1">{
+                return fmt.Errorf("client credentials authentication failed: %w", err)
         }</span>
-        <span class="cov4" title="3">c.tokenMu.Unlock()
-
-        // Exchange client credentials for access token
-        token, expiresIn, err := c.fetchAccessToken(ctx)
-        if err != nil </span><span class="cov1" title="1">{
+        <span class="cov2" title="2">token, err := a.EnsureToken(ctx)
+        if err != nil </span><span class="cov0" title="0">{
                 return fmt.Errorf("client credentials authentication failed: %w", err)
         }</span>
 
-        <span class="cov2" title="2">c.tokenMu.Lock()
-        c.cachedToken = token
-        c.tokenExpiry = time.Now().Add(time.Duration(expiresIn) * time.Second)
+        <span class="cov2" title="2">c.authMu.Lock()
         c.AccessToken = token
-        c.tokenMu.Unlock()
+        c.authMu.Unlock()
 
-        c.logger.Infof("Authenticated via client credentials (token expires in %ds)", expiresIn)
+        c.logger.Infof("Authenticated via client credentials (token expires %s)", a.Expiry().Format(time.RFC3339))
         return nil</span>
 }
 
-// oauthTokenResponse represents the response from the OAuth token endpoint
-type oauthTokenResponse struct {
-        AccessToken string `json:"access_token"`
-        Scope       string `json:"scope"`
-        ExpiresIn   int    `json:"expires_in"`
+// ensureAuth lazily constructs the shared Authenticator.
+func (c *ShopifyClient) ensureAuth() *auth.Authenticator <span class="cov4" title="3">{
+        c.authMu.Lock()
+        defer c.authMu.Unlock()
+        if c.auth == nil </span><span class="cov4" title="3">{
+                c.auth = auth.New(auth.Config{
+                        StoreURL:     c.StoreURL,
+                        AccessToken:  c.AccessToken,
+                        ClientID:     c.ClientID,
+                        ClientSecret: c.ClientSecret,
+                        APIVersion:   c.APIVersion,
+                        HTTPClient:   c.HTTPClient,
+                })
+        }</span>
+        <span class="cov4" title="3">return c.auth</span>
 }
 
-// fetchAccessToken POSTs to the Shopify OAuth endpoint to exchange client
-// credentials for a short-lived access token.
-func (c *ShopifyClient) fetchAccessToken(ctx context.Context) (string, int, error) <span class="cov4" title="3">{
-        // Build the token URL from the store URL
-        storeBase := strings.TrimSuffix(c.StoreURL, "/")
-        tokenURL := fmt.Sprintf("%s/admin/oauth/access_token", storeBase)
-
-        data := url.Values{}
-        data.Set("grant_type", "client_credentials")
-        data.Set("client_id", c.ClientID)
-        data.Set("client_secret", c.ClientSecret)
-
-        req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
-        if err != nil </span><span class="cov0" title="0">{
-                return "", 0, fmt.Errorf("create token request: %w", err)
+// currentToken returns a valid access token, refreshing if needed.
+func (c *ShopifyClient) currentToken(ctx context.Context) (string, error) <span class="cov4" title="4">{
+        if c.ClientID != "" &amp;&amp; c.ClientSecret != "" </span><span class="cov0" title="0">{
+                return c.ensureAuth().EnsureToken(ctx)
         }</span>
-        <span class="cov4" title="3">req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-        resp, err := c.HTTPClient.Do(req)
-        if err != nil </span><span class="cov0" title="0">{
-                return "", 0, fmt.Errorf("token request failed: %w", err)
-        }</span>
-        <span class="cov4" title="3">defer resp.Body.Close()
-
-        body, err := io.ReadAll(resp.Body)
-        if err != nil </span><span class="cov0" title="0">{
-                return "", 0, fmt.Errorf("read token response: %w", err)
-        }</span>
-
-        <span class="cov4" title="3">if resp.StatusCode != http.StatusOK </span><span class="cov1" title="1">{
-                return "", 0, fmt.Errorf("token request returned HTTP %d: %s", resp.StatusCode, string(body))
-        }</span>
-
-        <span class="cov2" title="2">var tokenResp oauthTokenResponse
-        if err := json.Unmarshal(body, &amp;tokenResp); err != nil </span><span class="cov0" title="0">{
-                return "", 0, fmt.Errorf("parse token response: %w", err)
-        }</span>
-
-        <span class="cov2" title="2">if tokenResp.AccessToken == "" </span><span class="cov0" title="0">{
-                return "", 0, fmt.Errorf("token response missing access_token")
-        }</span>
-
-        <span class="cov2" title="2">return tokenResp.AccessToken, tokenResp.ExpiresIn, nil</span>
+        <span class="cov4" title="4">return c.AccessToken, nil</span>
 }
 
 // Request represents an API request
@@ -1249,7 +1208,11 @@ func (c *ShopifyClient) Do(ctx context.Context, req Request) (*Response, error) 
                 return nil, fmt.Errorf("create request: %w", err)
         }</span>
 
-        <span class="cov4" title="4">httpReq.Header.Set("X-Shopify-Access-Token", c.AccessToken)
+        <span class="cov4" title="4">token, err := c.currentToken(ctx)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("auth: %w", err)
+        }</span>
+        <span class="cov4" title="4">httpReq.Header.Set("X-Shopify-Access-Token", token)
         httpReq.Header.Set("Content-Type", "application/json")
 
         if req.QueryParams != nil </span><span class="cov0" title="0">{
@@ -1833,138 +1796,91 @@ func (r *ConflictResolver) GetSummary() map[ConflictMode]int <span class="cov0" 
 		<pre class="file" id="file6" style="display: none">package main
 
 import (
-        "encoding/json"
-        "fmt"
-        "os"
         "path/filepath"
-        "strings"
-        "time"
+
+        "github.com/btafoya/goshopify-backup/pkg/auth"
 )
 
-// CredentialManager manages saved store credentials (O4)
+// CredentialManager manages saved store credentials.
+// Backed by the shared pkg/auth credential store.
 type CredentialManager struct {
         credentialsDir string
 }
 
-// NewCredentialManager creates a new credential manager
+// NewCredentialManager creates a new credential manager using the default
+// credentials directory (~/.config/goshopify).
 func NewCredentialManager() *CredentialManager <span class="cov0" title="0">{
         dir := expandPath(CredentialsDir)
         return &amp;CredentialManager{credentialsDir: dir}
 }</span>
 
-// Save saves a credential to disk
+func (cm *CredentialManager) store() *auth.CredentialStore <span class="cov10" title="5">{
+        return auth.NewCredentialStoreAt(filepath.Join(cm.credentialsDir, CredentialsFile))
+}</span>
+
+// Save persists a credential.
 func (cm *CredentialManager) Save(cred Credential) error <span class="cov1" title="1">{
-        if err := os.MkdirAll(cm.credentialsDir, 0700); err != nil </span><span class="cov0" title="0">{
-                return fmt.Errorf("create credentials directory: %w", err)
-        }</span>
+        return cm.store().Save(toAuthCredential(cred))
+}</span>
 
-        <span class="cov1" title="1">cred.LastUsed = time.Now()
-
-        // Load existing credentials
-        creds, err := cm.loadAll()
-        if err != nil </span><span class="cov0" title="0">{
-                creds = make(map[string]Credential)
-        }</span>
-
-        // Store by store URL
-        <span class="cov1" title="1">key := cm.credKey(cred.Store)
-        creds[key] = cred
-
-        data, err := json.MarshalIndent(creds, "", "  ")
-        if err != nil </span><span class="cov0" title="0">{
-                return fmt.Errorf("marshal credentials: %w", err)
-        }</span>
-
-        <span class="cov1" title="1">filePath := filepath.Join(cm.credentialsDir, CredentialsFile)
-        return os.WriteFile(filePath, data, 0600)</span>
-}
-
-// Load loads a credential for a store
+// Load returns the credential for the given store URL.
 func (cm *CredentialManager) Load(storeURL string) (*Credential, error) <span class="cov4" title="2">{
-        creds, err := cm.loadAll()
-        if err != nil </span><span class="cov0" title="0">{
-                return nil, err
-        }</span>
-
-        <span class="cov4" title="2">key := cm.credKey(storeURL)
-        if cred, ok := creds[key]; ok </span><span class="cov1" title="1">{
-                return &amp;cred, nil
-        }</span>
-
-        <span class="cov1" title="1">return nil, fmt.Errorf("no saved credentials for %s", storeURL)</span>
-}
-
-// List returns all saved credentials
-func (cm *CredentialManager) List() ([]Credential, error) <span class="cov1" title="1">{
-        creds, err := cm.loadAll()
-        if err != nil </span><span class="cov0" title="0">{
-                return nil, err
-        }</span>
-
-        <span class="cov1" title="1">result := make([]Credential, 0, len(creds))
-        for _, cred := range creds </span><span class="cov1" title="1">{
-                result = append(result, cred)
-        }</span>
-        <span class="cov1" title="1">return result, nil</span>
-}
-
-// Delete removes a saved credential
-func (cm *CredentialManager) Delete(storeURL string) error <span class="cov1" title="1">{
-        creds, err := cm.loadAll()
-        if err != nil </span><span class="cov0" title="0">{
-                return err
-        }</span>
-
-        <span class="cov1" title="1">key := cm.credKey(storeURL)
-        delete(creds, key)
-
-        data, err := json.MarshalIndent(creds, "", "  ")
-        if err != nil </span><span class="cov0" title="0">{
-                return fmt.Errorf("marshal credentials: %w", err)
-        }</span>
-
-        <span class="cov1" title="1">filePath := filepath.Join(cm.credentialsDir, CredentialsFile)
-        return os.WriteFile(filePath, data, 0600)</span>
-}
-
-// loadAll reads all saved credentials
-func (cm *CredentialManager) loadAll() (map[string]Credential, error) <span class="cov10" title="5">{
-        filePath := filepath.Join(cm.credentialsDir, CredentialsFile)
-
-        data, err := os.ReadFile(filePath)
+        c, err := cm.store().Load(storeURL)
         if err != nil </span><span class="cov1" title="1">{
-                if os.IsNotExist(err) </span><span class="cov1" title="1">{
-                        return make(map[string]Credential), nil
-                }</span>
-                <span class="cov0" title="0">return nil, fmt.Errorf("read credentials: %w", err)</span>
-        }
-
-        <span class="cov8" title="4">var creds map[string]Credential
-        if err := json.Unmarshal(data, &amp;creds); err != nil </span><span class="cov0" title="0">{
-                return nil, fmt.Errorf("parse credentials: %w", err)
+                return nil, err
         }</span>
-
-        <span class="cov8" title="4">return creds, nil</span>
+        <span class="cov1" title="1">out := fromAuthCredential(*c)
+        return &amp;out, nil</span>
 }
 
-// credKey generates a storage key from a store URL
-func (cm *CredentialManager) credKey(storeURL string) string <span class="cov8" title="4">{
-        // Normalize: remove https:// and trailing slash
-        key := strings.TrimPrefix(storeURL, "https://")
-        key = strings.TrimPrefix(key, "http://")
-        key = strings.TrimSuffix(key, "/")
-        return key
+// List returns all stored credentials.
+func (cm *CredentialManager) List() ([]Credential, error) <span class="cov1" title="1">{
+        src, err := cm.store().List()
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov1" title="1">out := make([]Credential, len(src))
+        for i, c := range src </span><span class="cov1" title="1">{
+                out[i] = fromAuthCredential(c)
+        }</span>
+        <span class="cov1" title="1">return out, nil</span>
+}
+
+func toAuthCredential(c Credential) auth.Credential <span class="cov1" title="1">{
+        return auth.Credential{
+                Store:        c.Store,
+                AccessToken:  c.AccessToken,
+                ClientID:     c.ClientID,
+                ClientSecret: c.ClientSecret,
+                APIVersion:   c.APIVersion,
+                LastUsed:     c.LastUsed,
+                Nickname:     c.Nickname,
+        }
+}</span>
+
+func fromAuthCredential(c auth.Credential) Credential <span class="cov4" title="2">{
+        return Credential{
+                Store:        c.Store,
+                AccessToken:  c.AccessToken,
+                ClientID:     c.ClientID,
+                ClientSecret: c.ClientSecret,
+                APIVersion:   c.APIVersion,
+                LastUsed:     c.LastUsed,
+                Nickname:     c.Nickname,
+        }
+}</span>
+
+// Delete removes the credential for the given store URL.
+func (cm *CredentialManager) Delete(storeURL string) error <span class="cov1" title="1">{
+        return cm.store().Delete(storeURL)
 }</span>
 
 // GetOrPromptConfig checks for credentials and returns config values,
-// falling back to env vars and prompting if needed
+// falling back to env vars and prompting if needed.
 func GetOrPromptConfig(cfg *Config) error <span class="cov0" title="0">{
         cm := NewCredentialManager()
-
-        // If store is set but auth is missing, try saved credentials
         if cfg.Store != "" &amp;&amp; cfg.AccessToken == "" &amp;&amp; (cfg.ClientID == "" || cfg.ClientSecret == "") </span><span class="cov0" title="0">{
                 if cred, err := cm.Load(cfg.Store); err == nil </span><span class="cov0" title="0">{
-                        // Prefer saved client credentials over access token (they auto-refresh)
                         if cred.ClientID != "" &amp;&amp; cred.ClientSecret != "" </span><span class="cov0" title="0">{
                                 cfg.ClientID = cred.ClientID
                                 cfg.ClientSecret = cred.ClientSecret
@@ -1976,7 +1892,6 @@ func GetOrPromptConfig(cfg *Config) error <span class="cov0" title="0">{
                         }</span>
                 }
         }
-
         <span class="cov0" title="0">return nil</span>
 }
 </pre>

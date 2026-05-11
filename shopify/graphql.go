@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/btafoya/goshopify-backup/pkg/auth"
 )
 
 // GraphQL response types
@@ -118,6 +120,7 @@ type GraphQLClient struct {
 	apiVersion  string
 	limiter     *RateLimiter
 	client      *http.Client
+	auth        *auth.Authenticator
 }
 
 // NewGraphQLClient creates a new Shopify GraphQL client
@@ -127,10 +130,20 @@ func NewGraphQLClient(cfg *Config) *GraphQLClient {
 		accessToken: cfg.AccessToken,
 		apiVersion:  cfg.APIVersion,
 		limiter:     cfg.Limiter,
+		auth:        cfg.Authenticator,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// token returns the current access token, refreshing via the Authenticator
+// when configured.
+func (c *GraphQLClient) token(ctx context.Context) (string, error) {
+	if c.auth != nil {
+		return c.auth.EnsureToken(ctx)
+	}
+	return c.accessToken, nil
 }
 
 // endpoint returns the GraphQL API endpoint URL
@@ -176,8 +189,12 @@ func (c *GraphQLClient) SubmitBulkOperation(ctx context.Context, query string) (
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
+	token, err := c.token(ctx)
+	if err != nil {
+		return "", fmt.Errorf("auth: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Shopify-Access-Token", c.accessToken)
+	req.Header.Set("X-Shopify-Access-Token", token)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -265,8 +282,12 @@ func (c *GraphQLClient) PollBulkOperation(ctx context.Context, pollInterval, tim
 			return "", fmt.Errorf("failed to create request: %w", err)
 		}
 
+		token, err := c.token(ctx)
+		if err != nil {
+			return "", fmt.Errorf("auth: %w", err)
+		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Shopify-Access-Token", c.accessToken)
+		req.Header.Set("X-Shopify-Access-Token", token)
 
 		resp, err := c.client.Do(req)
 		if err != nil {
@@ -346,8 +367,12 @@ func (c *GraphQLClient) Query(ctx context.Context, payload string) ([]byte, erro
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	token, err := c.token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("auth: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Shopify-Access-Token", c.accessToken)
+	req.Header.Set("X-Shopify-Access-Token", token)
 
 	resp, err := c.client.Do(req)
 	if err != nil {

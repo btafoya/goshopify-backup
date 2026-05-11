@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 	"github.com/btafoya/goshopify-backup/backup"
 	"github.com/btafoya/goshopify-backup/lock"
 	"github.com/btafoya/goshopify-backup/logger"
+	"github.com/btafoya/goshopify-backup/pkg/auth"
 	"github.com/btafoya/goshopify-backup/recovery"
 	"github.com/btafoya/goshopify-backup/shopify"
 	"github.com/btafoya/goshopify-backup/status"
@@ -60,6 +62,35 @@ func main() {
 
 	// Setup signal handling for graceful shutdown
 	setupSignalHandling(cancel, log)
+
+	// Proactive authentication + scope validation (fail-fast before lock + work).
+	authenticator := buildAuthenticator(cfg)
+	if err := authenticator.Authenticate(ctx); err != nil {
+		var scopeErr *auth.MissingScopesError
+		switch {
+		case errors.Is(err, auth.ErrMissingCredentials):
+			log.Error("Authentication credentials missing", logger.LogFields{Error: err.Error()})
+			fmt.Fprintf(os.Stderr, "Authentication error: %v\n", err)
+			os.Exit(ExitConfigError)
+		case errors.As(err, &scopeErr):
+			log.Error("Token missing required scopes", logger.LogFields{
+				Error: err.Error(),
+			})
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			fmt.Fprintf(os.Stderr, "Grant these scopes in your Shopify app and retry.\n")
+			os.Exit(ExitConfigError)
+		default:
+			log.Error("Authentication failed", logger.LogFields{Error: err.Error()})
+			fmt.Fprintf(os.Stderr, "Authentication failed: %v\n", err)
+			os.Exit(ExitBackupFailed)
+		}
+	}
+	if cfg.AccessToken == "" {
+		log.Info("Authenticated via OAuth client credentials", logger.LogFields{
+			Module: "main",
+			Store:  cfg.Store,
+		})
+	}
 
 	// Get backup date (today's date in UTC)
 	backupDate := time.Now().UTC().Format(DateFormat)
@@ -129,10 +160,11 @@ func main() {
 	// Initialize Shopify clients
 	rateLimiter := shopify.NewRateLimiter(RequestsPerSecond)
 	shopifyConfig := &shopify.Config{
-		Store:       cfg.Store,
-		AccessToken: cfg.AccessToken,
-		APIVersion:  cfg.APIVersion,
-		Limiter:     rateLimiter,
+		Store:         cfg.Store,
+		AccessToken:   cfg.AccessToken,
+		APIVersion:    cfg.APIVersion,
+		Limiter:       rateLimiter,
+		Authenticator: authenticator,
 	}
 
 	graphqlClient := shopify.NewGraphQLClient(shopifyConfig)
@@ -183,6 +215,24 @@ func main() {
 	}
 }
 
+// buildAuthenticator constructs an Authenticator from config, persisting
+// credentials to disk when client credentials are in use.
+func buildAuthenticator(cfg *Config) *auth.Authenticator {
+	authCfg := auth.Config{
+		StoreURL:     cfg.Store,
+		AccessToken:  cfg.AccessToken,
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+		APIVersion:   cfg.APIVersion,
+	}
+	// Only persist + scope-check when using OAuth (no scope returned for direct tokens).
+	if cfg.AccessToken == "" {
+		authCfg.RequiredScopes = auth.BackupScopes
+		authCfg.CredentialsStore = auth.NewCredentialStore()
+	}
+	return auth.New(authCfg)
+}
+
 // loadEnv loads environment variables from .env file
 func loadEnv() error {
 	if err := importGodotenv(); err != nil {
@@ -221,7 +271,8 @@ func handleHealthCheck(cfg *Config, log *logger.Logger) {
 	healthy := true
 
 	// Check configuration
-	if cfg.Store == "" || cfg.AccessToken == "" {
+	hasAuth := cfg.AccessToken != "" || (cfg.ClientID != "" && cfg.ClientSecret != "")
+	if cfg.Store == "" || !hasAuth {
 		fmt.Println("CRITICAL: Configuration incomplete")
 		healthy = false
 	}

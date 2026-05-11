@@ -1,138 +1,91 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
-	"time"
+
+	"github.com/btafoya/goshopify-backup/pkg/auth"
 )
 
-// CredentialManager manages saved store credentials (O4)
+// CredentialManager manages saved store credentials.
+// Backed by the shared pkg/auth credential store.
 type CredentialManager struct {
 	credentialsDir string
 }
 
-// NewCredentialManager creates a new credential manager
+// NewCredentialManager creates a new credential manager using the default
+// credentials directory (~/.config/goshopify).
 func NewCredentialManager() *CredentialManager {
 	dir := expandPath(CredentialsDir)
 	return &CredentialManager{credentialsDir: dir}
 }
 
-// Save saves a credential to disk
+func (cm *CredentialManager) store() *auth.CredentialStore {
+	return auth.NewCredentialStoreAt(filepath.Join(cm.credentialsDir, CredentialsFile))
+}
+
+// Save persists a credential.
 func (cm *CredentialManager) Save(cred Credential) error {
-	if err := os.MkdirAll(cm.credentialsDir, 0700); err != nil {
-		return fmt.Errorf("create credentials directory: %w", err)
-	}
-
-	cred.LastUsed = time.Now()
-
-	// Load existing credentials
-	creds, err := cm.loadAll()
-	if err != nil {
-		creds = make(map[string]Credential)
-	}
-
-	// Store by store URL
-	key := cm.credKey(cred.Store)
-	creds[key] = cred
-
-	data, err := json.MarshalIndent(creds, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal credentials: %w", err)
-	}
-
-	filePath := filepath.Join(cm.credentialsDir, CredentialsFile)
-	return os.WriteFile(filePath, data, 0600)
+	return cm.store().Save(toAuthCredential(cred))
 }
 
-// Load loads a credential for a store
+// Load returns the credential for the given store URL.
 func (cm *CredentialManager) Load(storeURL string) (*Credential, error) {
-	creds, err := cm.loadAll()
+	c, err := cm.store().Load(storeURL)
 	if err != nil {
 		return nil, err
 	}
-
-	key := cm.credKey(storeURL)
-	if cred, ok := creds[key]; ok {
-		return &cred, nil
-	}
-
-	return nil, fmt.Errorf("no saved credentials for %s", storeURL)
+	out := fromAuthCredential(*c)
+	return &out, nil
 }
 
-// List returns all saved credentials
+// List returns all stored credentials.
 func (cm *CredentialManager) List() ([]Credential, error) {
-	creds, err := cm.loadAll()
+	src, err := cm.store().List()
 	if err != nil {
 		return nil, err
 	}
-
-	result := make([]Credential, 0, len(creds))
-	for _, cred := range creds {
-		result = append(result, cred)
+	out := make([]Credential, len(src))
+	for i, c := range src {
+		out[i] = fromAuthCredential(c)
 	}
-	return result, nil
+	return out, nil
 }
 
-// Delete removes a saved credential
+func toAuthCredential(c Credential) auth.Credential {
+	return auth.Credential{
+		Store:        c.Store,
+		AccessToken:  c.AccessToken,
+		ClientID:     c.ClientID,
+		ClientSecret: c.ClientSecret,
+		APIVersion:   c.APIVersion,
+		LastUsed:     c.LastUsed,
+		Nickname:     c.Nickname,
+	}
+}
+
+func fromAuthCredential(c auth.Credential) Credential {
+	return Credential{
+		Store:        c.Store,
+		AccessToken:  c.AccessToken,
+		ClientID:     c.ClientID,
+		ClientSecret: c.ClientSecret,
+		APIVersion:   c.APIVersion,
+		LastUsed:     c.LastUsed,
+		Nickname:     c.Nickname,
+	}
+}
+
+// Delete removes the credential for the given store URL.
 func (cm *CredentialManager) Delete(storeURL string) error {
-	creds, err := cm.loadAll()
-	if err != nil {
-		return err
-	}
-
-	key := cm.credKey(storeURL)
-	delete(creds, key)
-
-	data, err := json.MarshalIndent(creds, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal credentials: %w", err)
-	}
-
-	filePath := filepath.Join(cm.credentialsDir, CredentialsFile)
-	return os.WriteFile(filePath, data, 0600)
-}
-
-// loadAll reads all saved credentials
-func (cm *CredentialManager) loadAll() (map[string]Credential, error) {
-	filePath := filepath.Join(cm.credentialsDir, CredentialsFile)
-
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]Credential), nil
-		}
-		return nil, fmt.Errorf("read credentials: %w", err)
-	}
-
-	var creds map[string]Credential
-	if err := json.Unmarshal(data, &creds); err != nil {
-		return nil, fmt.Errorf("parse credentials: %w", err)
-	}
-
-	return creds, nil
-}
-
-// credKey generates a storage key from a store URL
-func (cm *CredentialManager) credKey(storeURL string) string {
-	// Normalize: remove https:// and trailing slash
-	key := strings.TrimPrefix(storeURL, "https://")
-	key = strings.TrimPrefix(key, "http://")
-	key = strings.TrimSuffix(key, "/")
-	return key
+	return cm.store().Delete(storeURL)
 }
 
 // GetOrPromptConfig checks for credentials and returns config values,
-// falling back to env vars and prompting if needed
+// falling back to env vars and prompting if needed.
 func GetOrPromptConfig(cfg *Config) error {
 	cm := NewCredentialManager()
-
-	// If store is set but auth is missing, try saved credentials
 	if cfg.Store != "" && cfg.AccessToken == "" && (cfg.ClientID == "" || cfg.ClientSecret == "") {
 		if cred, err := cm.Load(cfg.Store); err == nil {
-			// Prefer saved client credentials over access token (they auto-refresh)
 			if cred.ClientID != "" && cred.ClientSecret != "" {
 				cfg.ClientID = cred.ClientID
 				cfg.ClientSecret = cred.ClientSecret
@@ -144,6 +97,5 @@ func GetOrPromptConfig(cfg *Config) error {
 			}
 		}
 	}
-
 	return nil
 }

@@ -3,6 +3,8 @@ package shopify
 import (
 	"sync"
 	"time"
+
+	"github.com/btafoya/goshopify-backup/pkg/auth"
 )
 
 // RateLimiter implements a leaky bucket algorithm for rate limiting
@@ -33,10 +35,14 @@ func (r *RateLimiter) Wait() {
 	r.lastTime = time.Now()
 }
 
-// Config holds shared configuration for Shopify clients
+// Config holds shared configuration for Shopify clients.
+//
+// Authentication: provide either AccessToken (static) or Authenticator (OAuth
+// client_credentials with auto-refresh). If both are set, Authenticator wins.
 type Config struct {
-	Store       string
-	AccessToken string
-	APIVersion  string
-	Limiter     *RateLimiter
+	Store         string
+	AccessToken   string
+	APIVersion    string
+	Limiter       *RateLimiter
+	Authenticator *auth.Authenticator
 }

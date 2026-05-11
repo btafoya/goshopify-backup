@@ -15,9 +15,11 @@ services:
       - SHOPIFY_API_VERSION=${SHOPIFY_API_VERSION:-2025-01}
       - BACKUP_DIR=/backups
       - RETENTION_DAYS=${RETENTION_DAYS:-30}
+      - GOSHOPIFY_CREDS_FILE=/credentials/credentials.json
       - TZ=UTC
     volumes:
       - shopify-backups:/backups
+      - shopify-credentials:/credentials
     # Resource limits
     deploy:
       resources:
@@ -43,4 +45,6 @@ services:
 
 volumes:
   shopify-backups:
+    driver: local
+  shopify-credentials:
     driver: local

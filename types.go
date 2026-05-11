@@ -6,6 +6,8 @@ import "time"
 type Config struct {
 	Store         string
 	AccessToken   string
+	ClientID      string
+	ClientSecret  string
 	APIVersion    string
 	BackupDir     string
 	RetentionDays int

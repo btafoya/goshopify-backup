@@ -13,6 +13,8 @@ func GetConfig() (*Config, error) {
 	cfg := &Config{
 		Store:         os.Getenv("SHOPIFY_STORE"),
 		AccessToken:   os.Getenv("SHOPIFY_ACCESS_TOKEN"),
+		ClientID:      os.Getenv("SHOPIFY_CLIENT_ID"),
+		ClientSecret:  os.Getenv("SHOPIFY_SECRET"),
 		APIVersion:    getEnvDefault("SHOPIFY_API_VERSION", APIVersion),
 		BackupDir:     getEnvDefault("BACKUP_DIR", "/backups/shopify"),
 		Force:         os.Getenv("FORCE") == "true",
@@ -48,9 +50,14 @@ func ValidateConfig(cfg *Config) error {
 	// Remove trailing slash
 	cfg.Store = strings.TrimSuffix(cfg.Store, "/")
 
-	// Validate SHOPIFY_ACCESS_TOKEN
-	if cfg.AccessToken == "" {
-		return fmt.Errorf("SHOPIFY_ACCESS_TOKEN is required")
+	// Authentication: either SHOPIFY_ACCESS_TOKEN OR both SHOPIFY_CLIENT_ID + SHOPIFY_SECRET
+	hasToken := cfg.AccessToken != ""
+	hasClientCreds := cfg.ClientID != "" && cfg.ClientSecret != ""
+	if !hasToken && !hasClientCreds {
+		if cfg.ClientID != "" || cfg.ClientSecret != "" {
+			return fmt.Errorf("both SHOPIFY_CLIENT_ID and SHOPIFY_SECRET are required when using client credentials")
+		}
+		return fmt.Errorf("authentication required: set SHOPIFY_ACCESS_TOKEN or both SHOPIFY_CLIENT_ID and SHOPIFY_SECRET")
 	}
 
 	// Validate SHOPIFY_API_VERSION

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/btafoya/goshopify-backup/pkg/auth"
 	"github.com/go-resty/resty/v2"
 )
 
@@ -24,6 +25,7 @@ type RESTClient struct {
 	accessToken string
 	apiVersion  string
 	limiter     *RateLimiter
+	auth        *auth.Authenticator
 }
 
 // NewRESTClient creates a new Shopify REST client with retry configured
@@ -46,7 +48,17 @@ func NewRESTClient(cfg *Config) *RESTClient {
 		accessToken: cfg.AccessToken,
 		apiVersion:  cfg.APIVersion,
 		limiter:     cfg.Limiter,
+		auth:        cfg.Authenticator,
 	}
+}
+
+// token returns the current access token, refreshing via the Authenticator
+// when configured.
+func (c *RESTClient) token(ctx context.Context) (string, error) {
+	if c.auth != nil {
+		return c.auth.EnsureToken(ctx)
+	}
+	return c.accessToken, nil
 }
 
 // baseURL returns the REST API base URL
@@ -58,9 +70,14 @@ func (c *RESTClient) baseURL() string {
 func (c *RESTClient) Get(ctx context.Context, path string, result interface{}) error {
 	c.limiter.Wait()
 
+	token, err := c.token(ctx)
+	if err != nil {
+		return fmt.Errorf("auth: %w", err)
+	}
+
 	resp, err := c.client.R().
 		SetContext(ctx).
-		SetHeader("X-Shopify-Access-Token", c.accessToken).
+		SetHeader("X-Shopify-Access-Token", token).
 		SetHeader("Content-Type", "application/json").
 		SetResult(result).
 		Get(c.baseURL() + path)
@@ -85,9 +102,14 @@ func (c *RESTClient) GetPages(ctx context.Context, path string, result interface
 	for {
 		c.limiter.Wait()
 
+		token, err := c.token(ctx)
+		if err != nil {
+			return totalCount, fmt.Errorf("auth: %w", err)
+		}
+
 		resp, err := c.client.R().
 			SetContext(ctx).
-			SetHeader("X-Shopify-Access-Token", c.accessToken).
+			SetHeader("X-Shopify-Access-Token", token).
 			SetHeader("Content-Type", "application/json").
 			SetResult(result).
 			Get(c.baseURL() + pagePath)

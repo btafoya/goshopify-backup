@@ -67,7 +67,7 @@
 				
 				<option value="file5">github.com/btafoya/goshopify-backup/cleanup.go (0.0%)</option>
 				
-				<option value="file6">github.com/btafoya/goshopify-backup/config.go (78.4%)</option>
+				<option value="file6">github.com/btafoya/goshopify-backup/config.go (78.0%)</option>
 				
 				<option value="file7">github.com/btafoya/goshopify-backup/jsonl/parser.go (91.7%)</option>
 				
@@ -79,19 +79,25 @@
 				
 				<option value="file11">github.com/btafoya/goshopify-backup/main.go (0.0%)</option>
 				
-				<option value="file12">github.com/btafoya/goshopify-backup/recovery/recovery.go (0.0%)</option>
+				<option value="file12">github.com/btafoya/goshopify-backup/pkg/auth/auth.go (79.1%)</option>
 				
-				<option value="file13">github.com/btafoya/goshopify-backup/shopify/client.go (100.0%)</option>
+				<option value="file13">github.com/btafoya/goshopify-backup/pkg/auth/credentials.go (71.2%)</option>
 				
-				<option value="file14">github.com/btafoya/goshopify-backup/shopify/graphql.go (25.6%)</option>
+				<option value="file14">github.com/btafoya/goshopify-backup/pkg/auth/errors.go (0.0%)</option>
 				
-				<option value="file15">github.com/btafoya/goshopify-backup/shopify/rest.go (3.8%)</option>
+				<option value="file15">github.com/btafoya/goshopify-backup/recovery/recovery.go (0.0%)</option>
 				
-				<option value="file16">github.com/btafoya/goshopify-backup/status/types.go (91.3%)</option>
+				<option value="file16">github.com/btafoya/goshopify-backup/shopify/client.go (100.0%)</option>
 				
-				<option value="file17">github.com/btafoya/goshopify-backup/status/writer.go (52.2%)</option>
+				<option value="file17">github.com/btafoya/goshopify-backup/shopify/graphql.go (26.4%)</option>
 				
-				<option value="file18">github.com/btafoya/goshopify-backup/types.go (100.0%)</option>
+				<option value="file18">github.com/btafoya/goshopify-backup/shopify/rest.go (3.3%)</option>
+				
+				<option value="file19">github.com/btafoya/goshopify-backup/status/types.go (91.3%)</option>
+				
+				<option value="file20">github.com/btafoya/goshopify-backup/status/writer.go (52.2%)</option>
+				
+				<option value="file21">github.com/btafoya/goshopify-backup/types.go (100.0%)</option>
 				
 				</select>
 			</div>
@@ -2042,6 +2048,8 @@ func GetConfig() (*Config, error) <span class="cov1" title="1">{
         cfg := &amp;Config{
                 Store:         os.Getenv("SHOPIFY_STORE"),
                 AccessToken:   os.Getenv("SHOPIFY_ACCESS_TOKEN"),
+                ClientID:      os.Getenv("SHOPIFY_CLIENT_ID"),
+                ClientSecret:  os.Getenv("SHOPIFY_SECRET"),
                 APIVersion:    getEnvDefault("SHOPIFY_API_VERSION", APIVersion),
                 BackupDir:     getEnvDefault("BACKUP_DIR", "/backups/shopify"),
                 Force:         os.Getenv("FORCE") == "true",
@@ -2077,10 +2085,15 @@ func ValidateConfig(cfg *Config) error <span class="cov10" title="16">{
         // Remove trailing slash
         <span class="cov9" title="13">cfg.Store = strings.TrimSuffix(cfg.Store, "/")
 
-        // Validate SHOPIFY_ACCESS_TOKEN
-        if cfg.AccessToken == "" </span><span class="cov1" title="1">{
-                return fmt.Errorf("SHOPIFY_ACCESS_TOKEN is required")
-        }</span>
+        // Authentication: either SHOPIFY_ACCESS_TOKEN OR both SHOPIFY_CLIENT_ID + SHOPIFY_SECRET
+        hasToken := cfg.AccessToken != ""
+        hasClientCreds := cfg.ClientID != "" &amp;&amp; cfg.ClientSecret != ""
+        if !hasToken &amp;&amp; !hasClientCreds </span><span class="cov1" title="1">{
+                if cfg.ClientID != "" || cfg.ClientSecret != "" </span><span class="cov0" title="0">{
+                        return fmt.Errorf("both SHOPIFY_CLIENT_ID and SHOPIFY_SECRET are required when using client credentials")
+                }</span>
+                <span class="cov1" title="1">return fmt.Errorf("authentication required: set SHOPIFY_ACCESS_TOKEN or both SHOPIFY_CLIENT_ID and SHOPIFY_SECRET")</span>
+        }
 
         // Validate SHOPIFY_API_VERSION
         <span class="cov9" title="12">apiVersionRegex := regexp.MustCompile(`^\d{4}-\d{2}$`)
@@ -2656,6 +2669,7 @@ func (l *Logger) Debug(message string, fields LogFields) <span class="cov0" titl
 
 import (
         "context"
+        "errors"
         "fmt"
         "os"
         "os/signal"
@@ -2666,6 +2680,7 @@ import (
         "github.com/btafoya/goshopify-backup/backup"
         "github.com/btafoya/goshopify-backup/lock"
         "github.com/btafoya/goshopify-backup/logger"
+        "github.com/btafoya/goshopify-backup/pkg/auth"
         "github.com/btafoya/goshopify-backup/recovery"
         "github.com/btafoya/goshopify-backup/shopify"
         "github.com/btafoya/goshopify-backup/status"
@@ -2715,8 +2730,37 @@ func main() <span class="cov0" title="0">{
         // Setup signal handling for graceful shutdown
         setupSignalHandling(cancel, log)
 
+        // Proactive authentication + scope validation (fail-fast before lock + work).
+        authenticator := buildAuthenticator(cfg)
+        if err := authenticator.Authenticate(ctx); err != nil </span><span class="cov0" title="0">{
+                var scopeErr *auth.MissingScopesError
+                switch </span>{
+                case errors.Is(err, auth.ErrMissingCredentials):<span class="cov0" title="0">
+                        log.Error("Authentication credentials missing", logger.LogFields{Error: err.Error()})
+                        fmt.Fprintf(os.Stderr, "Authentication error: %v\n", err)
+                        os.Exit(ExitConfigError)</span>
+                case errors.As(err, &amp;scopeErr):<span class="cov0" title="0">
+                        log.Error("Token missing required scopes", logger.LogFields{
+                                Error: err.Error(),
+                        })
+                        fmt.Fprintf(os.Stderr, "%v\n", err)
+                        fmt.Fprintf(os.Stderr, "Grant these scopes in your Shopify app and retry.\n")
+                        os.Exit(ExitConfigError)</span>
+                default:<span class="cov0" title="0">
+                        log.Error("Authentication failed", logger.LogFields{Error: err.Error()})
+                        fmt.Fprintf(os.Stderr, "Authentication failed: %v\n", err)
+                        os.Exit(ExitBackupFailed)</span>
+                }
+        }
+        <span class="cov0" title="0">if cfg.AccessToken == "" </span><span class="cov0" title="0">{
+                log.Info("Authenticated via OAuth client credentials", logger.LogFields{
+                        Module: "main",
+                        Store:  cfg.Store,
+                })
+        }</span>
+
         // Get backup date (today's date in UTC)
-        backupDate := time.Now().UTC().Format(DateFormat)
+        <span class="cov0" title="0">backupDate := time.Now().UTC().Format(DateFormat)
 
         // Create backup directory
         backupDir := getBackupDirForDate(cfg, backupDate)
@@ -2783,10 +2827,11 @@ func main() <span class="cov0" title="0">{
         // Initialize Shopify clients
         <span class="cov0" title="0">rateLimiter := shopify.NewRateLimiter(RequestsPerSecond)
         shopifyConfig := &amp;shopify.Config{
-                Store:       cfg.Store,
-                AccessToken: cfg.AccessToken,
-                APIVersion:  cfg.APIVersion,
-                Limiter:     rateLimiter,
+                Store:         cfg.Store,
+                AccessToken:   cfg.AccessToken,
+                APIVersion:    cfg.APIVersion,
+                Limiter:       rateLimiter,
+                Authenticator: authenticator,
         }
 
         graphqlClient := shopify.NewGraphQLClient(shopifyConfig)
@@ -2837,6 +2882,24 @@ func main() <span class="cov0" title="0">{
         }</span>
 }
 
+// buildAuthenticator constructs an Authenticator from config, persisting
+// credentials to disk when client credentials are in use.
+func buildAuthenticator(cfg *Config) *auth.Authenticator <span class="cov0" title="0">{
+        authCfg := auth.Config{
+                StoreURL:     cfg.Store,
+                AccessToken:  cfg.AccessToken,
+                ClientID:     cfg.ClientID,
+                ClientSecret: cfg.ClientSecret,
+                APIVersion:   cfg.APIVersion,
+        }
+        // Only persist + scope-check when using OAuth (no scope returned for direct tokens).
+        if cfg.AccessToken == "" </span><span class="cov0" title="0">{
+                authCfg.RequiredScopes = auth.BackupScopes
+                authCfg.CredentialsStore = auth.NewCredentialStore()
+        }</span>
+        <span class="cov0" title="0">return auth.New(authCfg)</span>
+}
+
 // loadEnv loads environment variables from .env file
 func loadEnv() error <span class="cov0" title="0">{
         if err := importGodotenv(); err != nil </span><span class="cov0" title="0">{
@@ -2875,7 +2938,8 @@ func handleHealthCheck(cfg *Config, log *logger.Logger) <span class="cov0" title
         healthy := true
 
         // Check configuration
-        if cfg.Store == "" || cfg.AccessToken == "" </span><span class="cov0" title="0">{
+        hasAuth := cfg.AccessToken != "" || (cfg.ClientID != "" &amp;&amp; cfg.ClientSecret != "")
+        if cfg.Store == "" || !hasAuth </span><span class="cov0" title="0">{
                 fmt.Println("CRITICAL: Configuration incomplete")
                 healthy = false
         }</span>
@@ -3231,7 +3295,526 @@ func printSummary(statusWriter *status.Writer) <span class="cov0" title="0">{
 }
 </pre>
 		
-		<pre class="file" id="file12" style="display: none">package recovery
+		<pre class="file" id="file12" style="display: none">// Package auth provides Shopify authentication for both backup and restore tools.
+//
+// It supports two auth modes:
+//   - Direct access token (legacy): SHOPIFY_ACCESS_TOKEN
+//   - Client credentials OAuth (recommended): SHOPIFY_CLIENT_ID + SHOPIFY_SECRET
+//
+// The Authenticator handles token exchange, caching, scope validation,
+// concurrent-safe refresh, and optional disk persistence.
+package auth
+
+import (
+        "context"
+        "encoding/json"
+        "fmt"
+        "io"
+        "net/http"
+        "net/url"
+        "strings"
+        "sync"
+        "time"
+)
+
+const (
+        // TokenRefreshBuffer is how far before expiry to refresh a cached token.
+        TokenRefreshBuffer = 60 * time.Second
+
+        // RefreshMaxRetries bounds OAuth retry attempts on transient failures.
+        RefreshMaxRetries = 3
+
+        // RefreshBaseDelay is the initial backoff between OAuth retries.
+        RefreshBaseDelay = 2 * time.Second
+
+        defaultOAuthTimeout = 30 * time.Second
+)
+
+// Config configures a new Authenticator.
+type Config struct {
+        // StoreURL is the full Shopify store URL (https://example.myshopify.com).
+        StoreURL string
+
+        // AccessToken, if set, bypasses OAuth and is used directly.
+        AccessToken string
+
+        // ClientID + ClientSecret enable OAuth client_credentials grant.
+        ClientID     string
+        ClientSecret string
+
+        // APIVersion (e.g. "2025-01"). Persisted with credentials.
+        APIVersion string
+
+        // RequiredScopes lists scopes the token must include. Validated after fetch.
+        // Empty = no scope check.
+        RequiredScopes []string
+
+        // HTTPClient is used for OAuth requests. If nil a default is created.
+        HTTPClient *http.Client
+
+        // CredentialsStore, if non-nil, persists credentials + tokens to disk.
+        CredentialsStore *CredentialStore
+}
+
+// Authenticator manages a Shopify access token, refreshing via OAuth as needed.
+type Authenticator struct {
+        storeURL       string
+        accessToken    string
+        clientID       string
+        clientSecret   string
+        apiVersion     string
+        requiredScopes []string
+        httpClient     *http.Client
+        store          *CredentialStore
+
+        mu          sync.Mutex
+        cached      string
+        cachedScope string
+        expiry      time.Time
+}
+
+// New creates an Authenticator. Use Authenticate to fetch and validate
+// the initial token (proactive mode), or call EnsureToken on first use (lazy).
+func New(cfg Config) *Authenticator <span class="cov6" title="8">{
+        httpClient := cfg.HTTPClient
+        if httpClient == nil </span><span class="cov6" title="8">{
+                httpClient = &amp;http.Client{Timeout: defaultOAuthTimeout}
+        }</span>
+        <span class="cov6" title="8">return &amp;Authenticator{
+                storeURL:       strings.TrimSuffix(cfg.StoreURL, "/"),
+                accessToken:    cfg.AccessToken,
+                clientID:       cfg.ClientID,
+                clientSecret:   cfg.ClientSecret,
+                apiVersion:     cfg.APIVersion,
+                requiredScopes: cfg.RequiredScopes,
+                httpClient:     httpClient,
+                store:          cfg.CredentialsStore,
+        }</span>
+}
+
+// Authenticate performs proactive token acquisition and scope validation.
+// Call once at startup before any API requests. Returns ErrMissingCredentials
+// if neither auth mode is configured, or ErrMissingScopes if the token lacks
+// required scopes.
+func (a *Authenticator) Authenticate(ctx context.Context) error <span class="cov6" title="7">{
+        if a.accessToken != "" </span><span class="cov1" title="1">{
+                // Direct token: no scope check possible without an extra API call.
+                // Caller can issue a probe query if they need scope verification.
+                return nil
+        }</span>
+        <span class="cov5" title="6">if a.clientID == "" || a.clientSecret == "" </span><span class="cov1" title="1">{
+                return ErrMissingCredentials
+        }</span>
+
+        <span class="cov5" title="5">token, expiresIn, scope, err := a.fetchWithRetry(ctx)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("oauth: %w", err)
+        }</span>
+
+        <span class="cov5" title="5">if err := a.validateScopes(scope); err != nil </span><span class="cov1" title="1">{
+                return err
+        }</span>
+
+        <span class="cov4" title="4">a.mu.Lock()
+        a.cached = token
+        a.cachedScope = scope
+        a.expiry = time.Now().Add(time.Duration(expiresIn) * time.Second)
+        a.mu.Unlock()
+
+        if a.store != nil </span><span class="cov1" title="1">{
+                _ = a.store.Save(Credential{
+                        Store:        a.storeURL,
+                        ClientID:     a.clientID,
+                        ClientSecret: a.clientSecret,
+                        APIVersion:   a.apiVersion,
+                        AccessToken:  token,
+                        Scope:        scope,
+                        TokenExpiry:  a.expiry,
+                        LastUsed:     time.Now(),
+                })
+        }</span>
+
+        <span class="cov4" title="4">return nil</span>
+}
+
+// EnsureToken returns a valid access token, refreshing via OAuth if cached
+// token is expired or near-expiry. Safe for concurrent use.
+func (a *Authenticator) EnsureToken(ctx context.Context) (string, error) <span class="cov10" title="28">{
+        if a.accessToken != "" </span><span class="cov1" title="1">{
+                return a.accessToken, nil
+        }</span>
+
+        <span class="cov9" title="27">a.mu.Lock()
+        if a.cached != "" &amp;&amp; time.Now().Before(a.expiry.Add(-TokenRefreshBuffer)) </span><span class="cov5" title="6">{
+                token := a.cached
+                a.mu.Unlock()
+                return token, nil
+        }</span>
+        <span class="cov9" title="21">a.mu.Unlock()
+
+        if a.clientID == "" || a.clientSecret == "" </span><span class="cov0" title="0">{
+                return "", ErrMissingCredentials
+        }</span>
+
+        <span class="cov9" title="21">token, expiresIn, scope, err := a.fetchWithRetry(ctx)
+        if err != nil </span><span class="cov0" title="0">{
+                return "", fmt.Errorf("oauth refresh: %w", err)
+        }</span>
+
+        <span class="cov9" title="21">if err := a.validateScopes(scope); err != nil </span><span class="cov0" title="0">{
+                return "", err
+        }</span>
+
+        <span class="cov9" title="21">a.mu.Lock()
+        a.cached = token
+        a.cachedScope = scope
+        a.expiry = time.Now().Add(time.Duration(expiresIn) * time.Second)
+        a.mu.Unlock()
+
+        if a.store != nil </span><span class="cov0" title="0">{
+                _ = a.store.Save(Credential{
+                        Store:        a.storeURL,
+                        ClientID:     a.clientID,
+                        ClientSecret: a.clientSecret,
+                        APIVersion:   a.apiVersion,
+                        AccessToken:  token,
+                        Scope:        scope,
+                        TokenExpiry:  a.expiry,
+                        LastUsed:     time.Now(),
+                })
+        }</span>
+
+        <span class="cov9" title="21">return token, nil</span>
+}
+
+// Scopes returns scopes from the most recent token fetch (empty for direct token).
+func (a *Authenticator) Scopes() []string <span class="cov0" title="0">{
+        a.mu.Lock()
+        defer a.mu.Unlock()
+        if a.cachedScope == "" </span><span class="cov0" title="0">{
+                return nil
+        }</span>
+        <span class="cov0" title="0">return splitScopes(a.cachedScope)</span>
+}
+
+// Expiry returns the cached token expiry. Zero for direct tokens.
+func (a *Authenticator) Expiry() time.Time <span class="cov0" title="0">{
+        a.mu.Lock()
+        defer a.mu.Unlock()
+        return a.expiry
+}</span>
+
+// oauthTokenResponse mirrors Shopify's OAuth token endpoint payload.
+type oauthTokenResponse struct {
+        AccessToken string `json:"access_token"`
+        Scope       string `json:"scope"`
+        ExpiresIn   int    `json:"expires_in"`
+}
+
+// fetchWithRetry attempts up to RefreshMaxRetries OAuth token exchanges
+// with exponential backoff. Returns the last error if all attempts fail.
+func (a *Authenticator) fetchWithRetry(ctx context.Context) (token string, expiresIn int, scope string, err error) <span class="cov9" title="27">{
+        delay := RefreshBaseDelay
+        for attempt := 1; attempt &lt;= RefreshMaxRetries; attempt++ </span><span class="cov10" title="28">{
+                token, expiresIn, scope, err = a.fetchToken(ctx)
+                if err == nil </span><span class="cov9" title="27">{
+                        return token, expiresIn, scope, nil
+                }</span>
+                <span class="cov1" title="1">if attempt == RefreshMaxRetries </span><span class="cov0" title="0">{
+                        break</span>
+                }
+                <span class="cov1" title="1">select </span>{
+                case &lt;-ctx.Done():<span class="cov0" title="0">
+                        return "", 0, "", ctx.Err()</span>
+                case &lt;-time.After(delay):<span class="cov1" title="1"></span>
+                }
+                <span class="cov1" title="1">delay *= 2</span>
+        }
+        <span class="cov0" title="0">return "", 0, "", err</span>
+}
+
+// fetchToken performs a single OAuth client_credentials exchange.
+func (a *Authenticator) fetchToken(ctx context.Context) (string, int, string, error) <span class="cov10" title="28">{
+        tokenURL := fmt.Sprintf("%s/admin/oauth/access_token", a.storeURL)
+
+        form := url.Values{}
+        form.Set("grant_type", "client_credentials")
+        form.Set("client_id", a.clientID)
+        form.Set("client_secret", a.clientSecret)
+
+        req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+        if err != nil </span><span class="cov0" title="0">{
+                return "", 0, "", fmt.Errorf("build request: %w", err)
+        }</span>
+        <span class="cov10" title="28">req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+        resp, err := a.httpClient.Do(req)
+        if err != nil </span><span class="cov0" title="0">{
+                return "", 0, "", fmt.Errorf("post: %w", err)
+        }</span>
+        <span class="cov10" title="28">defer resp.Body.Close()
+
+        body, err := io.ReadAll(resp.Body)
+        if err != nil </span><span class="cov0" title="0">{
+                return "", 0, "", fmt.Errorf("read body: %w", err)
+        }</span>
+
+        <span class="cov10" title="28">if resp.StatusCode != http.StatusOK </span><span class="cov1" title="1">{
+                return "", 0, "", fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+        }</span>
+
+        <span class="cov9" title="27">var tr oauthTokenResponse
+        if err := json.Unmarshal(body, &amp;tr); err != nil </span><span class="cov0" title="0">{
+                return "", 0, "", fmt.Errorf("parse response: %w", err)
+        }</span>
+        <span class="cov9" title="27">if tr.AccessToken == "" </span><span class="cov0" title="0">{
+                return "", 0, "", fmt.Errorf("empty access_token in response")
+        }</span>
+        <span class="cov9" title="27">if tr.ExpiresIn &lt;= 0 </span><span class="cov0" title="0">{
+                return "", 0, "", fmt.Errorf("invalid expires_in: %d", tr.ExpiresIn)
+        }</span>
+        <span class="cov9" title="27">return tr.AccessToken, tr.ExpiresIn, tr.Scope, nil</span>
+}
+
+// validateScopes returns ErrMissingScopes if any required scope is absent
+// from the granted scope string.
+func (a *Authenticator) validateScopes(granted string) error <span class="cov9" title="26">{
+        if len(a.requiredScopes) == 0 </span><span class="cov9" title="24">{
+                return nil
+        }</span>
+        <span class="cov2" title="2">have := make(map[string]struct{}, 16)
+        for _, s := range splitScopes(granted) </span><span class="cov3" title="3">{
+                have[s] = struct{}{}
+        }</span>
+        <span class="cov2" title="2">var missing []string
+        for _, want := range a.requiredScopes </span><span class="cov3" title="3">{
+                if _, ok := have[want]; !ok </span><span class="cov1" title="1">{
+                        missing = append(missing, want)
+                }</span>
+        }
+        <span class="cov2" title="2">if len(missing) &gt; 0 </span><span class="cov1" title="1">{
+                return &amp;MissingScopesError{Required: a.requiredScopes, Missing: missing, Granted: splitScopes(granted)}
+        }</span>
+        <span class="cov1" title="1">return nil</span>
+}
+
+func splitScopes(s string) []string <span class="cov3" title="3">{
+        if s == "" </span><span class="cov0" title="0">{
+                return nil
+        }</span>
+        <span class="cov3" title="3">parts := strings.Split(s, ",")
+        out := make([]string, 0, len(parts))
+        for _, p := range parts </span><span class="cov4" title="4">{
+                p = strings.TrimSpace(p)
+                if p != "" </span><span class="cov4" title="4">{
+                        out = append(out, p)
+                }</span>
+        }
+        <span class="cov3" title="3">return out</span>
+}
+</pre>
+		
+		<pre class="file" id="file13" style="display: none">package auth
+
+import (
+        "encoding/json"
+        "fmt"
+        "os"
+        "path/filepath"
+        "strings"
+        "sync"
+        "time"
+)
+
+// DefaultCredentialsDir is the default directory for persisted credentials.
+// Override with GOSHOPIFY_CREDS_FILE env var or by constructing CredentialStore
+// with a custom path.
+const (
+        DefaultCredentialsDir  = "~/.config/goshopify"
+        DefaultCredentialsFile = "credentials.json"
+        credentialsDirPerm     = 0o700
+        credentialsFilePerm    = 0o600
+)
+
+// Credential represents persisted credentials and the most recent cached token.
+type Credential struct {
+        Store        string    `json:"store"`
+        AccessToken  string    `json:"access_token,omitempty"`
+        ClientID     string    `json:"client_id,omitempty"`
+        ClientSecret string    `json:"client_secret,omitempty"`
+        APIVersion   string    `json:"api_version,omitempty"`
+        Scope        string    `json:"scope,omitempty"`
+        TokenExpiry  time.Time `json:"token_expiry,omitzero"`
+        LastUsed     time.Time `json:"last_used"`
+        Nickname     string    `json:"nickname,omitempty"`
+}
+
+// CredentialStore persists credentials to disk in a single JSON file keyed
+// by normalized store URL.
+type CredentialStore struct {
+        path string
+        mu   sync.Mutex
+}
+
+// NewCredentialStore returns a store at the default path
+// ($GOSHOPIFY_CREDS_FILE or ~/.config/goshopify/credentials.json).
+func NewCredentialStore() *CredentialStore <span class="cov0" title="0">{
+        if p := os.Getenv("GOSHOPIFY_CREDS_FILE"); p != "" </span><span class="cov0" title="0">{
+                return &amp;CredentialStore{path: p}
+        }</span>
+        <span class="cov0" title="0">return &amp;CredentialStore{
+                path: filepath.Join(expandHome(DefaultCredentialsDir), DefaultCredentialsFile),
+        }</span>
+}
+
+// NewCredentialStoreAt returns a store at the given path.
+func NewCredentialStoreAt(path string) *CredentialStore <span class="cov5" title="3">{
+        return &amp;CredentialStore{path: path}
+}</span>
+
+// Path returns the on-disk credentials file path.
+func (s *CredentialStore) Path() string <span class="cov0" title="0">{
+        return s.path
+}</span>
+
+// Save writes the credential to disk, merging with any existing entries.
+func (s *CredentialStore) Save(c Credential) error <span class="cov6" title="4">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        if err := os.MkdirAll(filepath.Dir(s.path), credentialsDirPerm); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("create credentials dir: %w", err)
+        }</span>
+
+        <span class="cov6" title="4">creds, _ := s.loadAllLocked()
+        if creds == nil </span><span class="cov0" title="0">{
+                creds = make(map[string]Credential)
+        }</span>
+        <span class="cov6" title="4">c.LastUsed = time.Now()
+        creds[credKey(c.Store)] = c
+
+        data, err := json.MarshalIndent(creds, "", "  ")
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("marshal credentials: %w", err)
+        }</span>
+        <span class="cov6" title="4">if err := os.WriteFile(s.path, data, credentialsFilePerm); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("write credentials: %w", err)
+        }</span>
+        <span class="cov6" title="4">return nil</span>
+}
+
+// Load returns the credential for the given store URL.
+func (s *CredentialStore) Load(storeURL string) (*Credential, error) <span class="cov5" title="3">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        creds, err := s.loadAllLocked()
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov5" title="3">c, ok := creds[credKey(storeURL)]
+        if !ok </span><span class="cov1" title="1">{
+                return nil, fmt.Errorf("no saved credentials for %s", storeURL)
+        }</span>
+        <span class="cov3" title="2">return &amp;c, nil</span>
+}
+
+// List returns all stored credentials.
+func (s *CredentialStore) List() ([]Credential, error) <span class="cov1" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        creds, err := s.loadAllLocked()
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov1" title="1">out := make([]Credential, 0, len(creds))
+        for _, c := range creds </span><span class="cov3" title="2">{
+                out = append(out, c)
+        }</span>
+        <span class="cov1" title="1">return out, nil</span>
+}
+
+// Delete removes the credential for the given store URL.
+func (s *CredentialStore) Delete(storeURL string) error <span class="cov1" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        creds, err := s.loadAllLocked()
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov1" title="1">delete(creds, credKey(storeURL))
+
+        data, err := json.MarshalIndent(creds, "", "  ")
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("marshal credentials: %w", err)
+        }</span>
+        <span class="cov1" title="1">return os.WriteFile(s.path, data, credentialsFilePerm)</span>
+}
+
+func (s *CredentialStore) loadAllLocked() (map[string]Credential, error) <span class="cov10" title="9">{
+        data, err := os.ReadFile(s.path)
+        if err != nil </span><span class="cov5" title="3">{
+                if os.IsNotExist(err) </span><span class="cov5" title="3">{
+                        return make(map[string]Credential), nil
+                }</span>
+                <span class="cov0" title="0">return nil, fmt.Errorf("read credentials: %w", err)</span>
+        }
+        <span class="cov8" title="6">var creds map[string]Credential
+        if err := json.Unmarshal(data, &amp;creds); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("parse credentials: %w", err)
+        }</span>
+        <span class="cov8" title="6">return creds, nil</span>
+}
+
+func credKey(storeURL string) string <span class="cov9" title="8">{
+        k := strings.TrimPrefix(storeURL, "https://")
+        k = strings.TrimPrefix(k, "http://")
+        k = strings.TrimSuffix(k, "/")
+        return k
+}</span>
+
+func expandHome(path string) string <span class="cov0" title="0">{
+        if strings.HasPrefix(path, "~/") || path == "~" </span><span class="cov0" title="0">{
+                home, err := os.UserHomeDir()
+                if err == nil </span><span class="cov0" title="0">{
+                        return filepath.Join(home, strings.TrimPrefix(path, "~"))
+                }</span>
+        }
+        <span class="cov0" title="0">return path</span>
+}
+</pre>
+		
+		<pre class="file" id="file14" style="display: none">package auth
+
+import (
+        "errors"
+        "fmt"
+        "strings"
+)
+
+// ErrMissingCredentials is returned when neither a direct access token nor
+// a client ID + secret pair was provided.
+var ErrMissingCredentials = errors.New("authentication requires either SHOPIFY_ACCESS_TOKEN or both SHOPIFY_CLIENT_ID and SHOPIFY_SECRET")
+
+// MissingScopesError indicates the granted token lacks one or more required scopes.
+type MissingScopesError struct {
+        Required []string
+        Missing  []string
+        Granted  []string
+}
+
+func (e *MissingScopesError) Error() string <span class="cov0" title="0">{
+        return fmt.Sprintf(
+                "shopify token missing required scopes: %s (granted: %s)",
+                strings.Join(e.Missing, ", "),
+                strings.Join(e.Granted, ", "),
+        )
+}</span>
+</pre>
+		
+		<pre class="file" id="file15" style="display: none">package recovery
 
 import (
         "fmt"
@@ -3407,11 +3990,13 @@ func (m *Manager) CleanOldLock(date string) error <span class="cov0" title="0">{
 }
 </pre>
 		
-		<pre class="file" id="file13" style="display: none">package shopify
+		<pre class="file" id="file16" style="display: none">package shopify
 
 import (
         "sync"
         "time"
+
+        "github.com/btafoya/goshopify-backup/pkg/auth"
 )
 
 // RateLimiter implements a leaky bucket algorithm for rate limiting
@@ -3442,16 +4027,21 @@ func (r *RateLimiter) Wait() <span class="cov10" title="11">{
         <span class="cov10" title="11">r.lastTime = time.Now()</span>
 }
 
-// Config holds shared configuration for Shopify clients
+// Config holds shared configuration for Shopify clients.
+//
+// Authentication: provide either AccessToken (static) or Authenticator (OAuth
+// client_credentials with auto-refresh). If both are set, Authenticator wins.
 type Config struct {
-        Store       string
-        AccessToken string
-        APIVersion  string
-        Limiter     *RateLimiter
+        Store         string
+        AccessToken   string
+        APIVersion    string
+        Limiter       *RateLimiter
+        Authenticator *auth.Authenticator
 }
+
 </pre>
 		
-		<pre class="file" id="file14" style="display: none">package shopify
+		<pre class="file" id="file17" style="display: none">package shopify
 
 import (
         "context"
@@ -3461,6 +4051,8 @@ import (
         "net/http"
         "strings"
         "time"
+
+        "github.com/btafoya/goshopify-backup/pkg/auth"
 )
 
 // GraphQL response types
@@ -3571,6 +4163,7 @@ type GraphQLClient struct {
         apiVersion  string
         limiter     *RateLimiter
         client      *http.Client
+        auth        *auth.Authenticator
 }
 
 // NewGraphQLClient creates a new Shopify GraphQL client
@@ -3580,11 +4173,21 @@ func NewGraphQLClient(cfg *Config) *GraphQLClient <span class="cov10" title="5">
                 accessToken: cfg.AccessToken,
                 apiVersion:  cfg.APIVersion,
                 limiter:     cfg.Limiter,
+                auth:        cfg.Authenticator,
                 client: &amp;http.Client{
                         Timeout: 30 * time.Second,
                 },
         }
 }</span>
+
+// token returns the current access token, refreshing via the Authenticator
+// when configured.
+func (c *GraphQLClient) token(ctx context.Context) (string, error) <span class="cov8" title="4">{
+        if c.auth != nil </span><span class="cov0" title="0">{
+                return c.auth.EnsureToken(ctx)
+        }</span>
+        <span class="cov8" title="4">return c.accessToken, nil</span>
+}
 
 // endpoint returns the GraphQL API endpoint URL
 func (c *GraphQLClient) endpoint() string <span class="cov8" title="4">{
@@ -3629,8 +4232,12 @@ func (c *GraphQLClient) SubmitBulkOperation(ctx context.Context, query string) (
                 return "", fmt.Errorf("failed to create request: %w", err)
         }</span>
 
+        <span class="cov0" title="0">token, err := c.token(ctx)
+        if err != nil </span><span class="cov0" title="0">{
+                return "", fmt.Errorf("auth: %w", err)
+        }</span>
         <span class="cov0" title="0">req.Header.Set("Content-Type", "application/json")
-        req.Header.Set("X-Shopify-Access-Token", c.accessToken)
+        req.Header.Set("X-Shopify-Access-Token", token)
 
         resp, err := c.client.Do(req)
         if err != nil </span><span class="cov0" title="0">{
@@ -3718,8 +4325,12 @@ func (c *GraphQLClient) PollBulkOperation(ctx context.Context, pollInterval, tim
                         return "", fmt.Errorf("failed to create request: %w", err)
                 }</span>
 
+                <span class="cov0" title="0">token, err := c.token(ctx)
+                if err != nil </span><span class="cov0" title="0">{
+                        return "", fmt.Errorf("auth: %w", err)
+                }</span>
                 <span class="cov0" title="0">req.Header.Set("Content-Type", "application/json")
-                req.Header.Set("X-Shopify-Access-Token", c.accessToken)
+                req.Header.Set("X-Shopify-Access-Token", token)
 
                 resp, err := c.client.Do(req)
                 if err != nil </span><span class="cov0" title="0">{
@@ -3799,8 +4410,12 @@ func (c *GraphQLClient) Query(ctx context.Context, payload string) ([]byte, erro
                 return nil, fmt.Errorf("failed to create request: %w", err)
         }</span>
 
+        <span class="cov8" title="4">token, err := c.token(ctx)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("auth: %w", err)
+        }</span>
         <span class="cov8" title="4">req.Header.Set("Content-Type", "application/json")
-        req.Header.Set("X-Shopify-Access-Token", c.accessToken)
+        req.Header.Set("X-Shopify-Access-Token", token)
 
         resp, err := c.client.Do(req)
         if err != nil </span><span class="cov0" title="0">{
@@ -3832,7 +4447,7 @@ func (c *GraphQLClient) Query(ctx context.Context, payload string) ([]byte, erro
 }
 </pre>
 		
-		<pre class="file" id="file15" style="display: none">package shopify
+		<pre class="file" id="file18" style="display: none">package shopify
 
 import (
         "context"
@@ -3842,6 +4457,7 @@ import (
         "strings"
         "time"
 
+        "github.com/btafoya/goshopify-backup/pkg/auth"
         "github.com/go-resty/resty/v2"
 )
 
@@ -3858,6 +4474,7 @@ type RESTClient struct {
         accessToken string
         apiVersion  string
         limiter     *RateLimiter
+        auth        *auth.Authenticator
 }
 
 // NewRESTClient creates a new Shopify REST client with retry configured
@@ -3880,7 +4497,17 @@ func NewRESTClient(cfg *Config) *RESTClient <span class="cov8" title="1">{
                 accessToken: cfg.AccessToken,
                 apiVersion:  cfg.APIVersion,
                 limiter:     cfg.Limiter,
+                auth:        cfg.Authenticator,
         }</span>
+}
+
+// token returns the current access token, refreshing via the Authenticator
+// when configured.
+func (c *RESTClient) token(ctx context.Context) (string, error) <span class="cov0" title="0">{
+        if c.auth != nil </span><span class="cov0" title="0">{
+                return c.auth.EnsureToken(ctx)
+        }</span>
+        <span class="cov0" title="0">return c.accessToken, nil</span>
 }
 
 // baseURL returns the REST API base URL
@@ -3892,9 +4519,14 @@ func (c *RESTClient) baseURL() string <span class="cov0" title="0">{
 func (c *RESTClient) Get(ctx context.Context, path string, result interface{}) error <span class="cov0" title="0">{
         c.limiter.Wait()
 
-        resp, err := c.client.R().
+        token, err := c.token(ctx)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("auth: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">resp, err := c.client.R().
                 SetContext(ctx).
-                SetHeader("X-Shopify-Access-Token", c.accessToken).
+                SetHeader("X-Shopify-Access-Token", token).
                 SetHeader("Content-Type", "application/json").
                 SetResult(result).
                 Get(c.baseURL() + path)
@@ -3919,9 +4551,14 @@ func (c *RESTClient) GetPages(ctx context.Context, path string, result interface
         for </span><span class="cov0" title="0">{
                 c.limiter.Wait()
 
-                resp, err := c.client.R().
+                token, err := c.token(ctx)
+                if err != nil </span><span class="cov0" title="0">{
+                        return totalCount, fmt.Errorf("auth: %w", err)
+                }</span>
+
+                <span class="cov0" title="0">resp, err := c.client.R().
                         SetContext(ctx).
-                        SetHeader("X-Shopify-Access-Token", c.accessToken).
+                        SetHeader("X-Shopify-Access-Token", token).
                         SetHeader("Content-Type", "application/json").
                         SetResult(result).
                         Get(c.baseURL() + pagePath)
@@ -3994,7 +4631,7 @@ func updatePageInfo(path string, page_info string) string <span class="cov0" tit
 }
 </pre>
 		
-		<pre class="file" id="file16" style="display: none">package status
+		<pre class="file" id="file19" style="display: none">package status
 
 import "time"
 
@@ -4126,7 +4763,7 @@ func (s *BackupStatus) ApplyUpdate(update StatusUpdate) <span class="cov3" title
 }
 </pre>
 		
-		<pre class="file" id="file17" style="display: none">package status
+		<pre class="file" id="file20" style="display: none">package status
 
 import (
         "encoding/json"
@@ -4258,7 +4895,7 @@ func LoadStatus(outputDir string) (*BackupStatus, error) <span class="cov0" titl
 }
 </pre>
 		
-		<pre class="file" id="file18" style="display: none">package main
+		<pre class="file" id="file21" style="display: none">package main
 
 import "time"
 
@@ -4266,6 +4903,8 @@ import "time"
 type Config struct {
         Store         string
         AccessToken   string
+        ClientID      string
+        ClientSecret  string
         APIVersion    string
         BackupDir     string
         RetentionDays int
